@@ -282,59 +282,101 @@
   const benchBtn = document.getElementById('opfs-bench-btn');
   const benchLog = document.getElementById('opfs-bench-log');
 
-  async function getOpfsRefDir({ create }) {
-    const root = await navigator.storage.getDirectory();
-    const app = await root.getDirectoryHandle('qtqc-mm2browser', { create });
-    const refs = await app.getDirectoryHandle('references', { create });
-    return refs.getDirectoryHandle(REF_ID, { create });
-  }
+  /**
+   * Install runs inside a dedicated worker because Safari's OPFS does not
+   * implement createWritable(); the only portable write path is
+   * createSyncAccessHandle().write() in a dedicated worker.
+   *
+   * Main thread: fetch every file over HTTP, post Uint8Arrays to worker.
+   * Worker: opens directory, creates each file via sync access handle, writes,
+   * closes.
+   */
+  function makeInstallWorker() {
+    const src = `
+      self.onmessage = async (ev) => {
+        const { refId, files } = ev.data;
+        try {
+          const root = await navigator.storage.getDirectory();
+          const app = await root.getDirectoryHandle('qtqc-mm2browser', { create: true });
+          const refs = await app.getDirectoryHandle('references', { create: true });
+          const refDir = await refs.getDirectoryHandle(refId, { create: true });
 
-  async function writeOpfsFile(refDir, name, bytes) {
-    const fh = await refDir.getFileHandle(name, { create: true });
-    const w = await fh.createWritable();
-    await w.write(bytes);
-    await w.close();
+          let totalBytes = 0;
+          for (const f of files) {
+            const fh = await refDir.getFileHandle(f.path, { create: true });
+            const sah = await fh.createSyncAccessHandle({ mode: 'readwrite' });
+            try {
+              sah.truncate(0);
+              const written = sah.write(f.bytes, { at: 0 });
+              if (written !== f.bytes.byteLength) {
+                throw new Error('short write on ' + f.path + ': ' + written + '/' + f.bytes.byteLength);
+              }
+              sah.flush();
+              totalBytes += written;
+            } finally {
+              sah.close();
+            }
+          }
+          self.postMessage({ ok: true, totalBytes });
+        } catch (e) {
+          self.postMessage({ ok: false, error: String(e?.message ?? e), stack: e?.stack });
+        }
+      };
+    `;
+    const blob = new Blob([src], { type: 'application/javascript' });
+    return new Worker(URL.createObjectURL(blob), { type: 'classic' });
   }
 
   installBtn.addEventListener('click', async () => {
     installLog.textContent = 'fetching shards…';
+    const worker = makeInstallWorker();
     try {
       const t0 = performance.now();
       const base = '../../../fixtures/synthetic/index-out-1';
-      const refDir = await getOpfsRefDir({ create: true });
 
-      // Manifest first.
+      // Fetch manifest, then every declared file.
       const refResp = await fetch(`${base}/reference.json`);
       const refText = await refResp.text();
-      await writeOpfsFile(refDir, 'reference.json', new TextEncoder().encode(refText));
-
       const ref = JSON.parse(refText);
-      let totalBytes = refText.length;
+
+      const files = [];
+      files.push({ path: 'reference.json', bytes: new TextEncoder().encode(refText) });
       for (const f of ref.files) {
         const r = await fetch(`${base}/${f.path}`);
         const ab = await r.arrayBuffer();
-        await writeOpfsFile(refDir, f.path, new Uint8Array(ab));
-        totalBytes += ab.byteLength;
+        files.push({ path: f.path, bytes: new Uint8Array(ab) });
       }
 
-      // .install-marker.json last (commit point).
       const manifestSha = await sha256Hex(new TextEncoder().encode(refText));
       const marker = JSON.stringify({
         manifestSha256: manifestSha,
         completedAt: new Date().toISOString(),
         mapperVersion: '0.0.0',
       });
-      await writeOpfsFile(refDir, '.install-marker.json', new TextEncoder().encode(marker));
+      files.push({ path: '.install-marker.json', bytes: new TextEncoder().encode(marker) });
+
+      const result = await new Promise((resolve, reject) => {
+        worker.onmessage = (ev) => resolve(ev.data);
+        worker.onerror = (e) => reject(new Error(`install worker: ${e.message}`));
+        // Transfer the underlying ArrayBuffers so we don't double-allocate.
+        const transfers = files.map(f => f.bytes.buffer);
+        worker.postMessage({ refId: REF_ID, files }, transfers);
+      });
+
+      if (!result.ok) throw new Error(result.error);
 
       const dt = (performance.now() - t0).toFixed(2);
-      const mib = (totalBytes / (1024 * 1024)).toFixed(2);
+      const mib = (result.totalBytes / (1024 * 1024)).toFixed(2);
       installLog.innerHTML =
-        `<span class="ok">OK</span>   wrote ${ref.files.length + 2} files (${mib} MiB) to OPFS in ${dt} ms\n` +
+        `<span class="ok">OK</span>   wrote ${files.length} files (${mib} MiB) to OPFS in ${dt} ms\n` +
         `      reference.json sha256 = ${manifestSha}\n` +
-        `      OPFS path = /qtqc-mm2browser/references/${REF_ID}/`;
+        `      OPFS path = /qtqc-mm2browser/references/${REF_ID}/\n` +
+        `      via dedicated-worker createSyncAccessHandle (Safari-compatible)`;
     } catch (e) {
       installLog.innerHTML = `<span class="err">FAIL</span> ${e.message ?? e}\n${e.stack ?? ''}`;
       throw e;
+    } finally {
+      worker.terminate();
     }
   });
 
