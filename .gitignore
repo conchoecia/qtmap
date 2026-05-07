@@ -35,3 +35,7 @@ Thumbs.db
 coverage/
 *.log
 *.tmp
+!packages/mapper-wasm/dist/
+
+
+!packages/mapper-wasm/dist/seed_core.wasm
