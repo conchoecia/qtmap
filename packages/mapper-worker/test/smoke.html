@@ -57,7 +57,7 @@
 <textarea id="seq">ACGTAGCATGCATGCATGCATGCATGCATGCAGCTAGCATCGTAGCTAGCATCGATCGACGCAGCTAGCATCGAGCAGCAGCAGGTACTAGCATCGATGCATGCATCGATGCATGC</textarea>
 <pre id="extract-log">—</pre>
 
-<h2>3. Synthetic shard lookup</h2>
+<h2>3. Synthetic shard lookup (over HTTP)</h2>
 <p class="muted">
   Fetches every <code>seed-shard-NNNN.bin</code> over HTTP, parses with the
   TS shard codec, and answers minimizer lookups extracted from the sequence
@@ -68,6 +68,32 @@
   <button id="lookup-btn">Run lookup</button>
 </div>
 <pre id="lookup-log">—</pre>
+
+<h2>4. Install synthetic reference into OPFS</h2>
+<p class="muted">
+  Writes the same shard set into <code>/qtqc-mm2browser/references/synth/</code>
+  in the Origin Private File System using the async <code>createWritable</code>
+  API. After install, Section 5 will read the shards back via dedicated-worker
+  <code>FileSystemSyncAccessHandle</code> for the OPFS read microbenchmark.
+</p>
+<div class="row">
+  <button id="opfs-install-btn">Install to OPFS</button>
+  <button id="opfs-clear-btn">Wipe OPFS</button>
+</div>
+<pre id="opfs-install-log">—</pre>
+
+<h2>5. OPFS read microbenchmark</h2>
+<p class="muted">
+  Runs 1000 random explicit-offset reads against the installed shards at
+  three granularities: 12 B (one hit record), 4 KB, 64 KB. Reports MiB/s
+  per granularity. The Phase 1 gate: Chrome must come within ~2× of
+  Firefox at 12 B granularity to keep the current shard layout, otherwise
+  bulk-shard reads.
+</p>
+<div class="row">
+  <button id="opfs-bench-btn">Run microbenchmark</button>
+</div>
+<pre id="opfs-bench-log">—</pre>
 
 <script type="module">
   import createModule from '../../mapper-wasm/dist/seed_core.js';
@@ -245,6 +271,209 @@
       lookupLog.innerHTML = `<span class="err">FAIL</span> ${e.message ?? e}\n${e.stack ?? ''}`;
       throw e;
     }
+  });
+
+  /* ----- Section 4: install to OPFS ----------------------------------- */
+
+  const REF_ID = 'synth';
+  const installLog = document.getElementById('opfs-install-log');
+  const installBtn = document.getElementById('opfs-install-btn');
+  const clearBtn = document.getElementById('opfs-clear-btn');
+  const benchBtn = document.getElementById('opfs-bench-btn');
+  const benchLog = document.getElementById('opfs-bench-log');
+
+  async function getOpfsRefDir({ create }) {
+    const root = await navigator.storage.getDirectory();
+    const app = await root.getDirectoryHandle('qtqc-mm2browser', { create });
+    const refs = await app.getDirectoryHandle('references', { create });
+    return refs.getDirectoryHandle(REF_ID, { create });
+  }
+
+  async function writeOpfsFile(refDir, name, bytes) {
+    const fh = await refDir.getFileHandle(name, { create: true });
+    const w = await fh.createWritable();
+    await w.write(bytes);
+    await w.close();
+  }
+
+  installBtn.addEventListener('click', async () => {
+    installLog.textContent = 'fetching shards…';
+    try {
+      const t0 = performance.now();
+      const base = '../../../fixtures/synthetic/index-out-1';
+      const refDir = await getOpfsRefDir({ create: true });
+
+      // Manifest first.
+      const refResp = await fetch(`${base}/reference.json`);
+      const refText = await refResp.text();
+      await writeOpfsFile(refDir, 'reference.json', new TextEncoder().encode(refText));
+
+      const ref = JSON.parse(refText);
+      let totalBytes = refText.length;
+      for (const f of ref.files) {
+        const r = await fetch(`${base}/${f.path}`);
+        const ab = await r.arrayBuffer();
+        await writeOpfsFile(refDir, f.path, new Uint8Array(ab));
+        totalBytes += ab.byteLength;
+      }
+
+      // .install-marker.json last (commit point).
+      const manifestSha = await sha256Hex(new TextEncoder().encode(refText));
+      const marker = JSON.stringify({
+        manifestSha256: manifestSha,
+        completedAt: new Date().toISOString(),
+        mapperVersion: '0.0.0',
+      });
+      await writeOpfsFile(refDir, '.install-marker.json', new TextEncoder().encode(marker));
+
+      const dt = (performance.now() - t0).toFixed(2);
+      const mib = (totalBytes / (1024 * 1024)).toFixed(2);
+      installLog.innerHTML =
+        `<span class="ok">OK</span>   wrote ${ref.files.length + 2} files (${mib} MiB) to OPFS in ${dt} ms\n` +
+        `      reference.json sha256 = ${manifestSha}\n` +
+        `      OPFS path = /qtqc-mm2browser/references/${REF_ID}/`;
+    } catch (e) {
+      installLog.innerHTML = `<span class="err">FAIL</span> ${e.message ?? e}\n${e.stack ?? ''}`;
+      throw e;
+    }
+  });
+
+  clearBtn.addEventListener('click', async () => {
+    installLog.textContent = 'wiping…';
+    try {
+      const root = await navigator.storage.getDirectory();
+      try {
+        await root.removeEntry('qtqc-mm2browser', { recursive: true });
+        installLog.innerHTML = '<span class="ok">OK</span>   /qtqc-mm2browser/ removed';
+      } catch (e) {
+        if (e.name === 'NotFoundError') {
+          installLog.innerHTML = '<span class="muted">already empty</span>';
+        } else {
+          throw e;
+        }
+      }
+    } catch (e) {
+      installLog.innerHTML = `<span class="err">FAIL</span> ${e.message ?? e}`;
+      throw e;
+    }
+  });
+
+  async function sha256Hex(bytes) {
+    const digest = await crypto.subtle.digest('SHA-256', bytes);
+    return [...new Uint8Array(digest)]
+      .map(b => b.toString(16).padStart(2, '0')).join('');
+  }
+
+  /* ----- Section 5: OPFS read microbenchmark -------------------------- */
+
+  /**
+   * Runs the benchmark inside a dedicated worker so we can use sync access
+   * handles. Inline the worker source via Blob + URL.createObjectURL to
+   * keep the test self-contained.
+   */
+  function makeBenchWorker() {
+    const src = `
+      self.onmessage = async (ev) => {
+        const { granularities, iterationsPerGranularity, refId } = ev.data;
+        try {
+          const root = await navigator.storage.getDirectory();
+          const app = await root.getDirectoryHandle('qtqc-mm2browser');
+          const refs = await app.getDirectoryHandle('references');
+          const refDir = await refs.getDirectoryHandle(refId);
+
+          // Pick all shard files and open sync handles up front.
+          const handles = [];
+          const sizes = [];
+          for await (const entry of refDir.values()) {
+            if (entry.kind === 'file' && entry.name.startsWith('seed-shard-')) {
+              const fh = await entry.getFile();
+              const sah = await entry.createSyncAccessHandle({ mode: 'read-only' });
+              handles.push(sah);
+              sizes.push(fh.size);
+            }
+          }
+          if (handles.length === 0) {
+            self.postMessage({ ok: false, error: 'no shards in OPFS — install first' });
+            return;
+          }
+
+          const results = [];
+          // Deterministic PRNG so re-runs are comparable.
+          let prng = 0xdeadbeef;
+          const rand = () => {
+            prng ^= prng << 13; prng ^= prng >>> 17; prng ^= prng << 5;
+            return prng >>> 0;
+          };
+          for (const g of granularities) {
+            const buf = new ArrayBuffer(g);
+            const view = new Uint8Array(buf);
+            const t0 = performance.now();
+            let bytes = 0;
+            for (let i = 0; i < iterationsPerGranularity; ++i) {
+              const idx = rand() % handles.length;
+              const h = handles[idx];
+              const max = Math.max(0, sizes[idx] - g);
+              const at = max === 0 ? 0 : (rand() % max);
+              const got = h.read(view, { at });
+              bytes += got;
+            }
+            const dt = performance.now() - t0;
+            results.push({
+              granularity: g,
+              iterations: iterationsPerGranularity,
+              wallMs: dt,
+              bytes,
+              mibPerSec: (bytes / (1024 * 1024)) / (dt / 1000),
+            });
+          }
+          for (const h of handles) h.close();
+          self.postMessage({ ok: true, results });
+        } catch (e) {
+          self.postMessage({ ok: false, error: String(e?.message ?? e), stack: e?.stack });
+        }
+      };
+    `;
+    const blob = new Blob([src], { type: 'application/javascript' });
+    return new Worker(URL.createObjectURL(blob), { type: 'classic' });
+  }
+
+  benchBtn.addEventListener('click', async () => {
+    benchLog.textContent = 'running…';
+    const worker = makeBenchWorker();
+    const t0 = performance.now();
+    const result = await new Promise((resolve, reject) => {
+      worker.onmessage = (ev) => resolve(ev.data);
+      worker.onerror = (e) => reject(new Error(`worker: ${e.message}`));
+      worker.postMessage({
+        granularities: [12, 4096, 65536],
+        iterationsPerGranularity: 1000,
+        refId: REF_ID,
+      });
+    });
+    worker.terminate();
+    const dt = (performance.now() - t0).toFixed(2);
+
+    if (!result.ok) {
+      benchLog.innerHTML = `<span class="err">FAIL</span> ${result.error}\n${result.stack ?? ''}`;
+      return;
+    }
+
+    const lines = [
+      `<span class="ok">OK</span>   ${result.results.length} granularities, total ${dt} ms`,
+      '',
+      '      granularity   iters    wall(ms)    bytes        MiB/s',
+      '      -----------   -----    --------    ----------   -------',
+    ];
+    for (const r of result.results) {
+      lines.push(
+        `      ${String(r.granularity).padStart(11)}` +
+        `   ${String(r.iterations).padStart(5)}` +
+        `   ${r.wallMs.toFixed(2).padStart(8)}` +
+        `    ${String(r.bytes).padStart(10)}` +
+        `   ${r.mibPerSec.toFixed(1).padStart(7)}`,
+      );
+    }
+    benchLog.innerHTML = lines.join('\n');
   });
 </script>
 
