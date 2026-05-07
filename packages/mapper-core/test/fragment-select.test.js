@@ -62,12 +62,14 @@ test('overlapping high-score chain on same qSpan becomes secondary alternate whe
 });
 
 test('primary picks highest-score fragment regardless of qStart order', () => {
-  // Lower-scoring fragment is earlier in the read.
+  // Lower-scoring fragment is earlier in the read. Disable the score-ratio
+  // floor for this test; the production default would treat a fragment at
+  // 30/90 = 0.33 of best as noise.
   const chains = [
     fakeChain({ contigId: 1, qStart: 1000, qEnd: 1800, refStart: 5000, refEnd: 5800, score: 90 }),
     fakeChain({ contigId: 2, qStart: 0,    qEnd: 800,  refStart: 1000, refEnd: 1800, score: 30 }),
   ];
-  const recs = selectFragments(chains);
+  const recs = selectFragments(chains, { minScoreRatio: 0 });
   assert.equal(recs.length, 2);
   // qStart-sorted: contigId 2 first, contigId 1 second.
   assert.equal(recs[0].contigId, 2);
