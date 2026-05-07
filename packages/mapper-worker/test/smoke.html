@@ -82,6 +82,22 @@
 </div>
 <pre id="opfs-install-log">—</pre>
 
+<h2>6. End-to-end mapping (FASTQ → SAM)</h2>
+<p class="muted">
+  Cuts known fragments from <code>synth.fa</code> as reads (50 forward,
+  50 reverse-complement, 300 bp each), runs them through the full
+  pipeline (extract → shard lookup → chain → fragment select → SAM emit),
+  and reports per-read placement match rate.
+</p>
+<div class="row">
+  <button id="map-btn">Map 100 synthetic reads</button>
+</div>
+<pre id="map-log">—</pre>
+<details>
+  <summary>SAM output preview (first 12 lines)</summary>
+  <pre id="map-sam-preview" style="font-size: 0.78rem;">—</pre>
+</details>
+
 <h2>5. OPFS read microbenchmark</h2>
 <p class="muted">
   Runs 1000 random explicit-offset reads against the installed shards at
@@ -107,6 +123,7 @@
     DIR_ENTRY_SIZE,
   } from '../../mapper-core/src/shard-codec.js';
   import { shardIdForHash } from '../../mapper-core/src/planner.js';
+  import { mapReads } from '../../mapper-core/src/map-reads.js';
 
   const initLog = document.getElementById('init-log');
   const extractBtn = document.getElementById('extract-btn');
@@ -405,6 +422,148 @@
     return [...new Uint8Array(digest)]
       .map(b => b.toString(16).padStart(2, '0')).join('');
   }
+
+  /* ----- Section 6: End-to-end mapping ------------------------------- */
+
+  const mapBtn = document.getElementById('map-btn');
+  const mapLog = document.getElementById('map-log');
+  const mapSamPreview = document.getElementById('map-sam-preview');
+
+  function reverseComplement(seq) {
+    const map = { A: 'T', T: 'A', C: 'G', G: 'C', N: 'N' };
+    let out = '';
+    for (let i = seq.length - 1; i >= 0; --i) out += map[seq[i]] || 'N';
+    return out;
+  }
+
+  mapBtn.addEventListener('click', async () => {
+    mapLog.textContent = 'preparing…';
+    try {
+      // Reuse the in-RAM shard set already loaded for Section 3.
+      if (!shards) await loadShardsOnce();
+
+      const synthFastaResp = await fetch('../../../fixtures/synthetic/synth.fa');
+      const synthFasta = await synthFastaResp.text();
+      const contigs = parseFasta(synthFasta).map(c => ({ name: c.name, length: c.seq.length }));
+      const contigSeqs = parseFasta(synthFasta).map(c => c.seq);
+
+      // Cut 50 fwd reads from contig 0 + 50 rev reads from contig 1.
+      const reads = [];
+      const truth = [];
+      for (let i = 0; i < 50; ++i) {
+        const refStart = 100 + i * 150;
+        const seq = contigSeqs[0].slice(refStart, refStart + 300);
+        reads.push({ name: `r${reads.length}`, seq, qual: '!'.repeat(seq.length) });
+        truth.push({ contigId: 0, refStart, jointStrand: 0 });
+      }
+      for (let i = 0; i < 50; ++i) {
+        const refStart = 100 + i * 150;
+        const raw = contigSeqs[1].slice(refStart, refStart + 300);
+        const seq = reverseComplement(raw);
+        reads.push({ name: `r${reads.length}`, seq, qual: '!'.repeat(seq.length) });
+        truth.push({ contigId: 1, refStart, jointStrand: 1 });
+      }
+
+      const refResp = await fetch('../../../fixtures/synthetic/index-out-1/reference.json');
+      const referenceManifest = await refResp.json();
+
+      const lookupHits = (sid, hashes) => {
+        const shard = shards[sid];
+        const dirBytes = new Uint8Array(
+          shard.hitsBuffer,
+          HEADER_SIZE,
+          shard.directory.length * DIR_ENTRY_SIZE,
+        );
+        const out = [];
+        for (const h of hashes) {
+          const e = findDirEntry(dirBytes, shard.directory.length, h);
+          if (!e) { out.push([]); continue; }
+          const hits = [];
+          for (let i = 0; i < e.hitCount; ++i) {
+            const off = shard.hitsByteOffset + (e.hitOffset + i) * HIT_RECORD_SIZE;
+            const hit = decodeHit(shard.hitsBuffer, off);
+            hits.push({ contigId: hit.contigId, refPos: hit.pos, refStrand: hit.strand });
+          }
+          out.push(hits);
+        }
+        return out;
+      };
+
+      const t0 = performance.now();
+      const result = await mapReads({
+        reads,
+        contigs,
+        referenceManifest,
+        extractMinimizers: (seq) => core.extractMinimizers(seq, referenceManifest.k, referenceManifest.w),
+        lookupHits: async (sid, hashes) => lookupHits(sid, hashes),
+      });
+      const dt = (performance.now() - t0).toFixed(2);
+
+      // Verify primary placements vs truth.
+      const bodyLines = result.sam.split('\n').filter(l => l && !l.startsWith('@'));
+      const placements = new Map();
+      for (const line of bodyLines) {
+        const f = line.split('\t');
+        const flag = parseInt(f[1], 10);
+        if (flag & 0x4) continue;
+        if (flag & 0x100) continue;
+        if (flag & 0x800 && placements.has(f[0])) continue;
+        if (!placements.has(f[0])) {
+          placements.set(f[0], {
+            refName: f[2],
+            pos0: parseInt(f[3], 10) - 1,
+            reverse: (flag & 0x10) !== 0,
+            mapq: parseInt(f[4], 10),
+          });
+        }
+      }
+
+      let placed = 0, withinTol = 0;
+      const mapqs = [];
+      for (let i = 0; i < reads.length; ++i) {
+        const got = placements.get(`r${i}`);
+        if (!got) continue;
+        placed++;
+        mapqs.push(got.mapq);
+        const expectedRef = contigs[truth[i].contigId].name;
+        if (got.refName === expectedRef
+            && Math.abs(got.pos0 - truth[i].refStart) <= 10
+            && (got.reverse ? 1 : 0) === truth[i].jointStrand) {
+          withinTol++;
+        }
+      }
+
+      const mapqMin = mapqs.length ? Math.min(...mapqs) : 0;
+      const mapqMax = mapqs.length ? Math.max(...mapqs) : 0;
+      const mapqMean = mapqs.length ? mapqs.reduce((a,b)=>a+b,0) / mapqs.length : 0;
+
+      const lines = [
+        `<span class="ok">OK</span>   ${reads.length} reads mapped end-to-end in ${dt} ms`,
+        '',
+        `      reads:           ${reads.length}`,
+        `      placed:          ${placed} (primary records emitted)`,
+        `      ±10 bp match:    ${withinTol} / ${reads.length}`,
+        `      MAPQ:            min=${mapqMin}, max=${mapqMax}, mean=${mapqMean.toFixed(1)}`,
+        '',
+        `      stats: ${JSON.stringify(result.stats, null, 2)}`,
+      ];
+
+      if (withinTol >= 90) {
+        lines.push('<span class="ok">PASS</span> end-to-end pipeline produces correct primary placements');
+      } else {
+        lines.push(`<span class="err">FAIL</span> only ${withinTol} / 100 reads matched truth within ±10 bp`);
+      }
+
+      mapLog.innerHTML = lines.join('\n');
+
+      // SAM preview (first 12 body lines + headers).
+      const previewLines = result.sam.split('\n').slice(0, 18);
+      mapSamPreview.textContent = previewLines.join('\n');
+    } catch (e) {
+      mapLog.innerHTML = `<span class="err">FAIL</span> ${e.message ?? e}\n${e.stack ?? ''}`;
+      throw e;
+    }
+  });
 
   /* ----- Section 5: OPFS read microbenchmark -------------------------- */
 
