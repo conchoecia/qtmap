@@ -98,6 +98,42 @@
   <pre id="map-sam-preview" style="font-size: 0.78rem;">—</pre>
 </details>
 
+<h2>8. Install mm39 mouse reference into OPFS (~3.9 GB, one-time)</h2>
+<p class="muted">
+  Streams all 4096 shards from <code>/tmp/mm39_build/index/</code> (served
+  via <code>fixtures/local/mm39_index/</code>) into your browser's OPFS.
+  After install, switch the Section 7 reference selector to <code>mm39</code>
+  and drop the 5KSR46 fastq.
+</p>
+<div class="row">
+  <button id="mm39-install-btn">Install mm39 to OPFS</button>
+  <button id="mm39-clear-btn">Wipe mm39</button>
+</div>
+<pre id="mm39-install-log">— click to install</pre>
+
+<h2>7. Map your own FASTQ against the installed reference</h2>
+<p class="muted">
+  Drop a real FASTQ file. The page reads it 4 lines at a time, extracts
+  minimizers via WASM, looks up hits against shards in OPFS, runs the
+  chain DP + fragment selection + SAM emit, and shows the result.
+</p>
+<div class="row">
+  <label>reference
+    <select id="fastq-ref">
+      <option value="synth">synth</option>
+      <option value="mm39">mm39 (install via Section 8 first)</option>
+    </select>
+  </label>
+  <input type="file" id="fastq-file" accept=".fastq,.fq,.txt" />
+  <label>max reads <input type="number" id="fastq-max" value="500" min="1" max="1000000" style="width: 6rem"></label>
+  <button id="fastq-run">Run mapper</button>
+</div>
+<pre id="fastq-log">— pick a FASTQ file then click Run mapper</pre>
+<details>
+  <summary>SAM output preview (first 12 lines)</summary>
+  <pre id="fastq-sam-preview" style="font-size: 0.78rem;">—</pre>
+</details>
+
 <h2>5. OPFS read microbenchmark</h2>
 <p class="muted">
   Runs 1000 random explicit-offset reads against the installed shards at
@@ -293,6 +329,14 @@
   /* ----- Section 4: install to OPFS ----------------------------------- */
 
   const REF_ID = 'synth';
+  // Resolve the OPFS directory holding a given reference's shard files.
+  // Reused by Sections 4 (synth install), 7 (FASTQ map), and 8 (mm39 install).
+  async function getOpfsRefDir({ create, refId = REF_ID }) {
+    const root = await navigator.storage.getDirectory();
+    const app = await root.getDirectoryHandle('qtqc-mm2browser', { create });
+    const refs = await app.getDirectoryHandle('references', { create });
+    return refs.getDirectoryHandle(refId, { create });
+  }
   const installLog = document.getElementById('opfs-install-log');
   const installBtn = document.getElementById('opfs-install-btn');
   const clearBtn = document.getElementById('opfs-clear-btn');
@@ -562,6 +606,259 @@
     } catch (e) {
       mapLog.innerHTML = `<span class="err">FAIL</span> ${e.message ?? e}\n${e.stack ?? ''}`;
       throw e;
+    }
+  });
+
+  /* ----- Section 7: Map a user-supplied FASTQ ------------------------- */
+
+  const fastqInput = document.getElementById('fastq-file');
+  const fastqMax = document.getElementById('fastq-max');
+  const fastqRun = document.getElementById('fastq-run');
+  const fastqLog = document.getElementById('fastq-log');
+  const fastqSamPreview = document.getElementById('fastq-sam-preview');
+
+  /**
+   * Stream-parse a Blob/File as FASTQ. Yields {name, seq, qual} per record.
+   * Caps at maxReads.
+   */
+  async function* streamFastqFile(file, maxReads) {
+    const reader = file.stream().pipeThrough(new TextDecoderStream()).getReader();
+    let buffer = '';
+    let count = 0;
+    let lineState = 0;
+    let cur = { name: '', seq: '', qual: '' };
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += value;
+      let nl;
+      while ((nl = buffer.indexOf('\n')) !== -1) {
+        const line = buffer.slice(0, nl);
+        buffer = buffer.slice(nl + 1);
+        if (lineState === 0) cur.name = line.startsWith('@') ? line.slice(1).split(/\s+/)[0] : line;
+        else if (lineState === 1) cur.seq = line;
+        else if (lineState === 3) {
+          cur.qual = line;
+          yield { name: cur.name, seq: cur.seq, qual: cur.qual };
+          ++count;
+          if (count >= maxReads) return;
+          cur = { name: '', seq: '', qual: '' };
+        }
+        lineState = (lineState + 1) % 4;
+      }
+    }
+  }
+
+  /**
+   * Inline OPFS-backed lookupHits callback (main-thread, async API).
+   * Caches shard headers + directory bytes after first touch.
+   */
+  function makeOpfsLookup(refDir, manifest) {
+    const cache = new Map(); // shardId -> { dir: ArrayBuffer, seedCount, hitTableOffset, fileHandle }
+    return async (shardId, hashes) => {
+      let entry = cache.get(shardId);
+      if (!entry) {
+        const fh = await refDir.getFileHandle(`seed-shard-${String(shardId).padStart(4, '0')}.bin`);
+        const file = await fh.getFile();
+        const headerAB = await file.slice(0, HEADER_SIZE).arrayBuffer();
+        const header = (await import('../../mapper-core/src/shard-codec.js')).parseShardHeader(headerAB);
+        const dirSize = header.seedCount * DIR_ENTRY_SIZE;
+        const dirAB = dirSize > 0
+          ? await file.slice(Number(header.directoryOffset), Number(header.directoryOffset) + dirSize).arrayBuffer()
+          : new ArrayBuffer(0);
+        entry = {
+          dir: dirAB,
+          seedCount: header.seedCount,
+          hitTableOffset: Number(header.hitTableOffset),
+          file,
+        };
+        cache.set(shardId, entry);
+      }
+      const dirView = new Uint8Array(entry.dir);
+      const out = [];
+      for (const h of hashes) {
+        const e = findDirEntry(dirView, entry.seedCount, h);
+        if (!e || e.hitCount === 0) { out.push([]); continue; }
+        const offset = entry.hitTableOffset + e.hitOffset * HIT_RECORD_SIZE;
+        const sliceAB = await entry.file.slice(offset, offset + e.hitCount * HIT_RECORD_SIZE).arrayBuffer();
+        const arr = new Array(e.hitCount);
+        for (let i = 0; i < e.hitCount; ++i) {
+          const hit = decodeHit(sliceAB, i * HIT_RECORD_SIZE);
+          arr[i] = { contigId: hit.contigId, refPos: hit.pos, refStrand: hit.strand };
+        }
+        out.push(arr);
+      }
+      return out;
+    };
+  }
+
+  fastqRun.addEventListener('click', async () => {
+    fastqLog.textContent = 'preparing…';
+    fastqSamPreview.textContent = '—';
+    try {
+      if (!fastqInput.files || fastqInput.files.length === 0) {
+        throw new Error('pick a FASTQ file first');
+      }
+      const file = fastqInput.files[0];
+      const maxReads = parseInt(fastqMax.value, 10) || 500;
+
+      // Resolve OPFS reference per the selector.
+      const refSelected = document.getElementById('fastq-ref').value;
+      const refDir = await getOpfsRefDir({ create: false, refId: refSelected }).catch(() => null);
+      if (!refDir) {
+        throw new Error(`no OPFS reference '${refSelected}' installed; run Section ${refSelected === 'mm39' ? 8 : 4} first`);
+      }
+      const manifestFh = await refDir.getFileHandle('reference.json');
+      const manifestText = await (await manifestFh.getFile()).text();
+      const manifest = JSON.parse(manifestText);
+
+      const contigsFh = await refDir.getFileHandle('contigs.bin');
+      const contigsAB = await (await contigsFh.getFile()).arrayBuffer();
+      const { parseContigs } = await import('../../mapper-core/src/contigs-codec.js');
+      const contigs = parseContigs(contigsAB);
+
+      const reads = [];
+      const t0 = performance.now();
+      for await (const r of streamFastqFile(file, maxReads)) reads.push(r);
+      const tParse = performance.now() - t0;
+
+      const lookup = makeOpfsLookup(refDir, manifest);
+      const tMap0 = performance.now();
+      const result = await mapReads({
+        reads,
+        contigs,
+        referenceManifest: manifest,
+        extractMinimizers: (seq) => core.extractMinimizers(seq, manifest.k, manifest.w),
+        lookupHits: lookup,
+      });
+      const tMap = performance.now() - tMap0;
+
+      const lines = [
+        `<span class="ok">OK</span>   parsed ${reads.length} reads in ${tParse.toFixed(1)} ms, mapped in ${tMap.toFixed(1)} ms`,
+        '',
+        `      reference:  ${manifest.referenceId} (${contigs.length} contigs, ${manifest.shards} shards)`,
+        `      reads:      ${reads.length}`,
+        `      mapped:     ${result.stats.mappedReads}`,
+        `      unmapped:   ${result.stats.unmappedReads}`,
+        `      fragments:  ${result.stats.totalFragments}`,
+        `      anchors:    ${result.stats.totalAnchors}`,
+        `      shards hit: ${result.stats.shardsTouched}`,
+        `      timings:    extract=${result.stats.timings.extractMs.toFixed(1)} ` +
+          `lookup=${result.stats.timings.lookupMs.toFixed(1)} ` +
+          `chain=${result.stats.timings.chainMs.toFixed(1)} ` +
+          `emit=${result.stats.timings.emitMs.toFixed(1)} ms`,
+      ];
+      fastqLog.innerHTML = lines.join('\n');
+
+      const previewLines = result.sam.split('\n').slice(0, 18);
+      fastqSamPreview.textContent = previewLines.join('\n');
+    } catch (e) {
+      fastqLog.innerHTML = `<span class="err">FAIL</span> ${e.message ?? e}\n${e.stack ?? ''}`;
+      throw e;
+    }
+  });
+
+  /* ----- Section 8: install mm39 to OPFS ------------------------------ */
+
+  const mm39InstallBtn = document.getElementById('mm39-install-btn');
+  const mm39ClearBtn = document.getElementById('mm39-clear-btn');
+  const mm39InstallLog = document.getElementById('mm39-install-log');
+
+  mm39InstallBtn.addEventListener('click', async () => {
+    mm39InstallLog.textContent = 'fetching reference.json…';
+    const worker = makeInstallWorker();
+    try {
+      const t0 = performance.now();
+      const base = '../../../fixtures/local/mm39_index';
+      const refResp = await fetch(`${base}/reference.json`);
+      if (!refResp.ok) {
+        throw new Error(`HTTP ${refResp.status} fetching reference.json. Did you symlink /tmp/mm39_build/index to fixtures/local/mm39_index?`);
+      }
+      const refText = await refResp.text();
+      const ref = JSON.parse(refText);
+
+      mm39InstallLog.textContent =
+        `manifest OK: ${ref.contigs} contigs, ${ref.shards} shards, ` +
+        `${ref.totalHits.toLocaleString()} hits. Streaming to OPFS…`;
+
+      // Stream shards in batches of 256 to keep RAM bounded; each shard is
+      // ~1 MB so 256-batch is ~256 MB transient.
+      const BATCH_FILES = 256;
+      let totalBytes = 0;
+      const allFiles = [{ path: 'reference.json' }, ...ref.files];
+      let installedFiles = 0;
+
+      for (let i = 0; i < allFiles.length; i += BATCH_FILES) {
+        const slice = allFiles.slice(i, i + BATCH_FILES);
+        const batchFiles = [];
+        for (const f of slice) {
+          const r = await fetch(f.path === 'reference.json' ? `${base}/reference.json` : `${base}/${f.path}`);
+          const ab = await r.arrayBuffer();
+          batchFiles.push({ path: f.path, bytes: new Uint8Array(ab) });
+        }
+        const result = await new Promise((resolve, reject) => {
+          worker.onmessage = (ev) => resolve(ev.data);
+          worker.onerror = (e) => reject(new Error(`install worker: ${e.message}`));
+          const transfers = batchFiles.map(f => f.bytes.buffer);
+          worker.postMessage({ refId: 'mm39', files: batchFiles }, transfers);
+        });
+        if (!result.ok) throw new Error(result.error);
+        totalBytes += result.totalBytes;
+        installedFiles += slice.length;
+        mm39InstallLog.textContent =
+          `installed ${installedFiles}/${allFiles.length} files ` +
+          `(${(totalBytes / (1024 * 1024)).toFixed(0)} MiB) ` +
+          `at ${((totalBytes / (1024 * 1024)) / ((performance.now() - t0) / 1000)).toFixed(1)} MiB/s…`;
+      }
+
+      // Marker last (commit point).
+      const manifestSha = await sha256Hex(new TextEncoder().encode(refText));
+      const marker = JSON.stringify({
+        manifestSha256: manifestSha,
+        completedAt: new Date().toISOString(),
+        mapperVersion: '0.0.0',
+      });
+      await new Promise((resolve, reject) => {
+        worker.onmessage = (ev) => resolve(ev.data);
+        worker.onerror = (e) => reject(new Error(`install worker: ${e.message}`));
+        const bytes = new TextEncoder().encode(marker);
+        worker.postMessage(
+          { refId: 'mm39', files: [{ path: '.install-marker.json', bytes }] },
+          [bytes.buffer],
+        );
+      });
+
+      const dt = (performance.now() - t0) / 1000;
+      const mib = (totalBytes / (1024 * 1024)).toFixed(0);
+      mm39InstallLog.innerHTML =
+        `<span class="ok">OK</span>   wrote ${installedFiles + 1} files (${mib} MiB) to OPFS in ${dt.toFixed(1)} s\n` +
+        `      avg throughput: ${((totalBytes / (1024 * 1024)) / dt).toFixed(1)} MiB/s\n` +
+        `      reference.json sha256 = ${manifestSha}\n` +
+        `      OPFS path = /qtqc-mm2browser/references/mm39/\n` +
+        `      Switch Section 7 reference selector to "mm39" and drop the 5KSR46 fastq.`;
+    } catch (e) {
+      mm39InstallLog.innerHTML = `<span class="err">FAIL</span> ${e.message ?? e}\n${e.stack ?? ''}`;
+      throw e;
+    } finally {
+      worker.terminate();
+    }
+  });
+
+  mm39ClearBtn.addEventListener('click', async () => {
+    mm39InstallLog.textContent = 'wiping…';
+    try {
+      const refDir = await getOpfsRefDir({ create: false, refId: 'mm39' }).catch(() => null);
+      if (!refDir) {
+        mm39InstallLog.innerHTML = '<span class="muted">already empty</span>';
+        return;
+      }
+      const root = await navigator.storage.getDirectory();
+      const app = await root.getDirectoryHandle('qtqc-mm2browser');
+      const refs = await app.getDirectoryHandle('references');
+      await refs.removeEntry('mm39', { recursive: true });
+      mm39InstallLog.innerHTML = '<span class="ok">OK</span>   /qtqc-mm2browser/references/mm39/ removed';
+    } catch (e) {
+      mm39InstallLog.innerHTML = `<span class="err">FAIL</span> ${e.message ?? e}`;
     }
   });
 
