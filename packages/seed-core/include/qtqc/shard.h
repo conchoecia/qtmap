@@ -30,7 +30,8 @@
  *   hits     : 6 B per hit             (was 12 B in v1)
  *
  * Hit record layout (6 bytes, little-endian):
- *   contig_id    : 16 bits (upper 8 reserved; only low 8 used in MVP)
+ *   contig_id    : 16 bits (full 16-bit range; supports up to 65 k contigs
+ *                   so hg38 alt scaffolds and pangenome refs all fit)
  *   pos          : 28 bits  (encoded into pos_strand_flags low 28 bits)
  *   strand       : 1 bit   (bit 28 of pos_strand_flags)
  *   flags        : 3 bits   (bits 29-31 of pos_strand_flags; reserved)
