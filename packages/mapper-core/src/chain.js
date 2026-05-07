@@ -60,10 +60,18 @@ export function chainAnchors(anchors, opts = {}) {
     arr.push(i);
   }
 
-  // Empirical calibration on 5KSR46/mm39 vs minimap2 v2.22 -ax map-ont:
-  // windowExt = 7 maximizes ±10 bp placement-match (~92.4 %) and Spearman
-  // on MAPQ. Lower values bias positive (chain ends fall short of minimap2
-  // base-level extension); higher values overshoot.
+  // Empirical calibration on 5KSR46 / mm39 (w=15 index) vs minimap2 v2.22:
+  //   ext   contacts   ±5      ±10     ±20
+  //    5      957     75.4 %   89.1 %  93.6 %
+  //    7      960     66.6 %   90.2 %  93.9 %    <-- chosen
+  //    9      924     56.6 %   91.5 %  94.5 %
+  //   10      854     50.4 %   91.8 %  94.7 %
+  //   11      789     43.6 %   83.6 %  94.8 %
+  //   13      604     33.0 %   69.4 %  95.1 %
+  // ext=7 hits the contact-count target (Hi-C is the assay-relevant metric)
+  // and lands at the ±5 / ±10 sweet spot. Larger ext gains ±10 placement
+  // but loses contacts via cross-junction over-extension into adjacent
+  // fragments of concatamer reads.
   const windowExt = opts.windowExt ?? 7;
   const chains = [];
   for (const idxs of buckets.values()) {
