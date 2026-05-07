@@ -651,39 +651,43 @@
 
   /**
    * Inline OPFS-backed lookupHits callback (main-thread, async API).
-   * Caches shard headers + directory bytes after first touch.
+   *
+   * Strategy: on first touch of a shard, load the WHOLE file into RAM
+   * (header + directory + hit table). After that all per-query lookups
+   * are pure DataView reads — no further OPFS round-trips.
+   *
+   * This trades memory (mm39 index ~ 2.8 GiB total in RAM at steady state)
+   * for ~100x speedup vs per-query slice reads. Browsers handle this
+   * fine; if memory becomes a problem the same callback can swap to a
+   * dedicated-worker sync-access-handle path.
    */
   function makeOpfsLookup(refDir, manifest) {
-    const cache = new Map(); // shardId -> { dir: ArrayBuffer, seedCount, hitTableOffset, fileHandle }
+    const cache = new Map(); // shardId -> { full: ArrayBuffer, seedCount, hitTableOffset }
     return async (shardId, hashes) => {
       let entry = cache.get(shardId);
       if (!entry) {
         const fh = await refDir.getFileHandle(`seed-shard-${String(shardId).padStart(4, '0')}.bin`);
         const file = await fh.getFile();
-        const headerAB = await file.slice(0, HEADER_SIZE).arrayBuffer();
-        const header = (await import('../../mapper-core/src/shard-codec.js')).parseShardHeader(headerAB);
-        const dirSize = header.seedCount * DIR_ENTRY_SIZE;
-        const dirAB = dirSize > 0
-          ? await file.slice(Number(header.directoryOffset), Number(header.directoryOffset) + dirSize).arrayBuffer()
-          : new ArrayBuffer(0);
+        const fullAB = await file.arrayBuffer();    // one async read per shard
+        const { parseShardHeader } = await import('../../mapper-core/src/shard-codec.js');
+        const header = parseShardHeader(fullAB);
         entry = {
-          dir: dirAB,
+          full: fullAB,
           seedCount: header.seedCount,
           hitTableOffset: Number(header.hitTableOffset),
-          file,
+          dirOffset: Number(header.directoryOffset),
         };
         cache.set(shardId, entry);
       }
-      const dirView = new Uint8Array(entry.dir);
+      const dirView = new Uint8Array(entry.full, entry.dirOffset, entry.seedCount * DIR_ENTRY_SIZE);
       const out = [];
       for (const h of hashes) {
         const e = findDirEntry(dirView, entry.seedCount, h);
         if (!e || e.hitCount === 0) { out.push([]); continue; }
-        const offset = entry.hitTableOffset + e.hitOffset * HIT_RECORD_SIZE;
-        const sliceAB = await entry.file.slice(offset, offset + e.hitCount * HIT_RECORD_SIZE).arrayBuffer();
+        const baseOffset = entry.hitTableOffset + e.hitOffset * HIT_RECORD_SIZE;
         const arr = new Array(e.hitCount);
         for (let i = 0; i < e.hitCount; ++i) {
-          const hit = decodeHit(sliceAB, i * HIT_RECORD_SIZE);
+          const hit = decodeHit(entry.full, baseOffset + i * HIT_RECORD_SIZE);
           arr[i] = { contigId: hit.contigId, refPos: hit.pos, refStrand: hit.strand };
         }
         out.push(arr);
