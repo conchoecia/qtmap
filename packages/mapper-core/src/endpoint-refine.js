@@ -39,7 +39,10 @@ const COMPLEMENT = { A: 'T', T: 'A', C: 'G', G: 'C', N: 'N' };
  * @param {object} [opts]
  * @param {number} [opts.maxExt=40]            max bp to extend per side
  * @param {number} [opts.windowSize=10]        sliding window over which to compute match rate
- * @param {number} [opts.minMatchRate=0.6]     stop extending when window match rate falls below this
+ * @param {number} [opts.minMatchRate=0.7]     stop extending when window match rate falls below this
+ *                                              (calibrated on 5KSR46/mm39 vs minimap2 -ax map-ont:
+ *                                               rate=0.7 hits exactly 953/953 contacts and 94.5 % at ±10 bp;
+ *                                               rate=0.6 undershoots contacts to 932; rate=0.8 overshoots to 956)
  * @returns {void}                             chain.qStart/qEnd/refStart/refEnd are updated
  */
 export function refineChainEndpoints(
@@ -48,7 +51,7 @@ export function refineChainEndpoints(
 ) {
   const maxExt = opts.maxExt ?? 40;
   const windowSize = opts.windowSize ?? 10;
-  const minMatchRate = opts.minMatchRate ?? 0.6;
+  const minMatchRate = opts.minMatchRate ?? 0.7;
 
   if (chain.jointStrand === 0) {
     refineForwardLeft(chain, readSeq, getRefBases, contigLength, maxExt, windowSize, minMatchRate);
