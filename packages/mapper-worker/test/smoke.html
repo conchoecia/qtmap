@@ -98,24 +98,27 @@
   <pre id="map-sam-preview" style="font-size: 0.78rem;">—</pre>
 </details>
 
-<h2>6. Install mm39 from a single .qpack file (recommended for end users)</h2>
+<h2>6. Install mm39 (RECOMMENDED — single .qpack file)</h2>
 <p class="muted">
-  Streams a single packed file (mm39_w15.qpack, ~3.4 GB) into OPFS.
-  Same end-state as Section 7 but the user only downloads ONE file
-  instead of 4099. Uses fetch + ReadableStream + dedicated-worker
-  sync-handle writes; works in all three browsers.
+  <strong>Sections 6 and 7 are alternatives. Run ONE, not both.</strong>
+  Section 6 streams a single packed file (mm39_w15.qpack, ~3.4 GB) into
+  OPFS. Same end-state as Section 7 but only ONE HTTP fetch instead of
+  4099. Uses fetch + ReadableStream + dedicated-worker sync-handle
+  writes; works in Chrome, Firefox, Safari.
 </p>
 <div class="row">
   <button id="qpack-install-btn">Install from .qpack</button>
 </div>
 <pre id="qpack-install-log">— click to install</pre>
 
-<h2>7. Install mm39 mouse reference into OPFS (4099 separate files; alt path)</h2>
+<h2>7. Install mm39 (alt path — 4099 separate file fetches)</h2>
 <p class="muted">
-  Streams all 4096 shards from <code>/tmp/mm39_build/index/</code> (served
-  via <code>fixtures/local/mm39_index/</code>) into your browser's OPFS.
-  After install, switch the Section 8 reference selector to <code>mm39</code>
-  and drop the 5KSR46 fastq.
+  <strong>Don't run this if you already ran Section 6.</strong>
+  Kept for benchmarking comparison. Streams each of 4096 shards from
+  <code>/tmp/mm39_build/index/</code> (served via
+  <code>fixtures/local/mm39_index/</code>) as a separate HTTP fetch.
+  After install, switch the Section 8 reference selector to
+  <code>mm39</code> and drop the 5KSR46 fastq.
 </p>
 <div class="row">
   <button id="mm39-install-btn">Install mm39 to OPFS</button>
@@ -1010,6 +1013,10 @@
             return await fh.createSyncAccessHandle({ mode: 'readwrite' });
           } catch (e) {
             if (e.name !== 'NoModificationAllowedError') throw e;
+            // Heartbeat so the UI doesn't look hung while we wait for a
+            // stale handle (left by a prior worker / another tab) to
+            // release. Up to 30 ticks at 500 ms = 15 s total.
+            self.postMessage({ type: 'retry', path, attempt: attempt + 1, max: 30 });
             await sleep(500);
           }
         }
@@ -1124,8 +1131,12 @@
             `(${pct}%, ${mibps.toFixed(1)} MiB/s)`;
         } else if (m.type === 'header') {
           qpackInstallLog.textContent =
-            `header parsed: ${m.fileCount} files. Streaming + writing to OPFS… ` +
-            `(progress updates after every 32 files written; first update arrives ~5 s in)`;
+            `header parsed: ${m.fileCount} files. Streaming + writing to OPFS…`;
+        } else if (m.type === 'retry') {
+          qpackInstallLog.innerHTML =
+            `<span class="warn">retrying</span> ${m.path} (attempt ${m.attempt}/${m.max}) ` +
+            `— a prior worker hasn't released its sync handle yet. ` +
+            `If this stays stuck past 30 attempts, close other tabs of this page and reload.`;
         } else if (m.type === 'error') {
           qpackInstallLog.innerHTML = `<span class="err">FAIL</span> ${m.error}\n${m.stack ?? ''}`;
         }
