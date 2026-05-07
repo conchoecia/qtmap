@@ -25,10 +25,10 @@ target_include_directories(seed_core
         ${CMAKE_CURRENT_SOURCE_DIR}/vendor
 )
 
-# Native CLI: qtqc-mm2-index
+# Native CLI: qtmap-index
 if(NOT EMSCRIPTEN)
-    add_executable(qtqc-mm2-index src/cli/index_build.c)
-    target_link_libraries(qtqc-mm2-index PRIVATE seed_core)
+    add_executable(qtmap-index src/cli/index_build.c)
+    target_link_libraries(qtmap-index PRIVATE seed_core)
 endif()
 
 # WASM module: seed_core.{js,wasm}

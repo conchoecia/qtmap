@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Cross-organism calibration check for qtqc-mm2-index + the mapper.
+# Cross-organism calibration check for qtmap-index + the mapper.
 #
 # Builds an index for S. cerevisiae sacCer3 (~12 Mbp, ~38 % GC),
 # generates 200 noiseless cut-and-RC reads from the reference, runs
@@ -27,7 +27,7 @@ fi
 
 echo "[2/4] build index (w=15)"
 mkdir -p "$WORKDIR/index_w15"
-"$ROOT/build/packages/seed-core/qtqc-mm2-index" \
+"$ROOT/build/packages/seed-core/qtmap-index" \
     --in "$WORKDIR/sacCer3.fa" \
     --out "$WORKDIR/index_w15" \
     --shard-bits 12 \

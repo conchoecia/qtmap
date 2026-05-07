@@ -6,22 +6,22 @@
  * and ~3-4x faster than the async API for the small-read patterns we use.
  *
  * Layout under OPFS root:
- *   /qtqc-mm2browser/references/<refId>/reference.json
- *   /qtqc-mm2browser/references/<refId>/contigs.bin
- *   /qtqc-mm2browser/references/<refId>/seed-shard-NNNN.bin
- *   /qtqc-mm2browser/references/<refId>/.install-marker.json
+ *   /qtmap/references/<refId>/reference.json
+ *   /qtmap/references/<refId>/contigs.bin
+ *   /qtmap/references/<refId>/seed-shard-NNNN.bin
+ *   /qtmap/references/<refId>/.install-marker.json
  *
  * The loader caches sync handles per shard file because opening one is
  * expensive (a few ms) and we expect to read every shard many times during
  * a mapping run.
  */
 
-const ROOT_DIR = 'qtqc-mm2browser';
+const ROOT_DIR = 'qtmap';
 const REFERENCES_DIR = 'references';
 
 /**
  * Open the OPFS root for the application namespace. Creates the
- * `/qtqc-mm2browser/references` tree on first run.
+ * `/qtmap/references` tree on first run.
  *
  * @returns {Promise<FileSystemDirectoryHandle>} the references/ dir handle
  */

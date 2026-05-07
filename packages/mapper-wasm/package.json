@@ -1,5 +1,5 @@
 {
-  "name": "@qtqc/mapper-wasm",
+  "name": "@qtmap/mapper-wasm",
   "version": "0.0.0",
   "private": true,
   "description": "Emscripten-built WebAssembly artifacts (seed_core.js, seed_core.wasm) and TypeScript bindings for the seed-core C library.",

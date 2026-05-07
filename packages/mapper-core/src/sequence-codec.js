@@ -1,7 +1,7 @@
 /**
  * @fileoverview 2-bit packed reference sequence reader for sequence.bin.
  *
- * Layout (mirrors qtqc-mm2-index --store-sequence):
+ * Layout (mirrors qtmap-index --store-sequence):
  *
  *   No header. Contigs are concatenated in declaration order. Each contig
  *   occupies ceil(length / 4) bytes. The byte offset for contig i is

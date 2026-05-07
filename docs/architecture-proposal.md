@@ -2,7 +2,7 @@
 
 ## Summary
 
-`qtqc-mm2browser` should be a browser-native QC mapper. It should use an
+`qtmap` should be a browser-native QC mapper. It should use an
 offline-built minimizer index stored as explicit binary shards, then map reads in
 workers using typed arrays and bounded memory.
 
@@ -143,7 +143,7 @@ All integers little-endian.
 
 ```json
 {
-  "format": "qtqc-mm2browser-reference",
+  "format": "qtmap-reference",
   "formatVersion": 1,
   "referenceId": "mm39",
   "taxid": 10090,

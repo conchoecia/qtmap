@@ -28,7 +28,7 @@ test('contigByteOffsets is the cumulative sum of ceil(length / 4)', () => {
 });
 
 test('decodeBases round-trips through CLI --store-sequence', () => {
-  // Build a tiny FASTA, run qtqc-mm2-index --store-sequence, decode bases,
+  // Build a tiny FASTA, run qtmap-index --store-sequence, decode bases,
   // verify they match the FASTA.
   const fasta = '>tiny\nAAGCCCAATAAACCACTCTGACTGGCCGAATAGGGATATAGGCAACGACATGTGCGGCGA\nACTGCAGCATCGATCGCTAGCATGCATGCATCGAATACGCATGCATCGATCGAATACGCG\n';
   const expected =
@@ -40,7 +40,7 @@ test('decodeBases round-trips through CLI --store-sequence', () => {
     const outDir = join(tmp, 'idx');
     writeFileSync(fastaPath, fasta);
     mkdirSync(outDir);
-    const cli = join(REPO_ROOT, 'build', 'packages', 'seed-core', 'qtqc-mm2-index');
+    const cli = join(REPO_ROOT, 'build', 'packages', 'seed-core', 'qtmap-index');
     execFileSync(cli, [
       '--in', fastaPath, '--out', outDir,
       '--shard-bits', '4', '--reference-id', 'tiny',

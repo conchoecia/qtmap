@@ -8,7 +8,7 @@
 /*
  * On-disk shard binary layout. All multi-byte integers are little-endian.
  *
- *   header      : qtqc_shard_header_t  (64 bytes; magic "MM2BSHRD")
+ *   header      : qtqc_shard_header_t  (64 bytes; magic "QTMAPSHD")
  *   directory   : seed_count * qtqc_shard_dir_entry_t (16 B each)
  *   hits        : hit_count   * qtqc_shard_hit_t      (12 B each)
  *
@@ -18,7 +18,7 @@
  * format_version: bumped any time the on-disk layout changes.
  */
 
-#define QTQC_SHARD_MAGIC      "MM2BSHRD"
+#define QTQC_SHARD_MAGIC      "QTMAPSHD"
 #define QTQC_SHARD_MAGIC_LEN  8
 #define QTQC_SHARD_FORMAT_VER 2u
 
@@ -50,7 +50,7 @@
 #pragma pack(push, 1)
 
 typedef struct {
-    char     magic[QTQC_SHARD_MAGIC_LEN]; /* "MM2BSHRD"      8B */
+    char     magic[QTQC_SHARD_MAGIC_LEN]; /* "QTMAPSHD"      8B */
     uint32_t format_version;              /*                 4B */
     uint32_t shard_id;                    /*                 4B */
     uint32_t seed_count;                  /*                 4B */

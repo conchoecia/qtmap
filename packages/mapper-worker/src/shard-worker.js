@@ -30,7 +30,7 @@ import {
   parseShardHeader,
   decodeHit,
   findDirEntry,
-} from '@qtqc/mapper-core/shard-codec';
+} from '@qtmap/mapper-core/shard-codec';
 
 /* --- Wire formats ----------------------------------------------------- */
 

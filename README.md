@@ -1,4 +1,4 @@
-# qtqc-mm2browser
+# qtmap
 
 Design notes for a browser-first long-read mapping engine for QTQC.
 

@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8" />
-<title>qtqc-mm2browser smoke test</title>
+<title>qtmap smoke test</title>
 <style>
   :root {
     color-scheme: light dark;
@@ -35,10 +35,10 @@
 </head>
 <body>
 
-<h1>qtqc-mm2browser smoke test</h1>
+<h1>qtmap smoke test</h1>
 <p class="muted">
   Loads <code>seed_core.wasm</code> (built locally via
-  <code>scripts/build-wasm.sh</code>) and the <code>@qtqc/mapper-core</code>
+  <code>scripts/build-wasm.sh</code>) and the <code>@qtmap/mapper-core</code>
   shard codec. Smoke test: run minimizer extraction in the browser, then
   look up minimizers against the synthetic 16-shard fixture committed at
   <code>fixtures/synthetic/index-out-1/</code>.
@@ -71,7 +71,7 @@
 
 <h2>4. Install synthetic reference into OPFS</h2>
 <p class="muted">
-  Writes the same shard set into <code>/qtqc-mm2browser/references/synth/</code>
+  Writes the same shard set into <code>/qtmap/references/synth/</code>
   in the Origin Private File System using the async <code>createWritable</code>
   API. After install, Section 5 will read the shards back via dedicated-worker
   <code>FileSystemSyncAccessHandle</code> for the OPFS read microbenchmark.
@@ -345,7 +345,7 @@
   // Reused by Sections 4 (synth install), 7 (FASTQ map), and 8 (mm39 install).
   async function getOpfsRefDir({ create, refId = REF_ID }) {
     const root = await navigator.storage.getDirectory();
-    const app = await root.getDirectoryHandle('qtqc-mm2browser', { create });
+    const app = await root.getDirectoryHandle('qtmap', { create });
     const refs = await app.getDirectoryHandle('references', { create });
     return refs.getDirectoryHandle(refId, { create });
   }
@@ -370,7 +370,7 @@
         const { refId, files } = ev.data;
         try {
           const root = await navigator.storage.getDirectory();
-          const app = await root.getDirectoryHandle('qtqc-mm2browser', { create: true });
+          const app = await root.getDirectoryHandle('qtmap', { create: true });
           const refs = await app.getDirectoryHandle('references', { create: true });
           const refDir = await refs.getDirectoryHandle(refId, { create: true });
 
@@ -443,7 +443,7 @@
       installLog.innerHTML =
         `<span class="ok">OK</span>   wrote ${files.length} files (${mib} MiB) to OPFS in ${dt} ms\n` +
         `      reference.json sha256 = ${manifestSha}\n` +
-        `      OPFS path = /qtqc-mm2browser/references/${REF_ID}/\n` +
+        `      OPFS path = /qtmap/references/${REF_ID}/\n` +
         `      via dedicated-worker createSyncAccessHandle (Safari-compatible)`;
     } catch (e) {
       installLog.innerHTML = `<span class="err">FAIL</span> ${e.message ?? e}\n${e.stack ?? ''}`;
@@ -458,8 +458,8 @@
     try {
       const root = await navigator.storage.getDirectory();
       try {
-        await root.removeEntry('qtqc-mm2browser', { recursive: true });
-        installLog.innerHTML = '<span class="ok">OK</span>   /qtqc-mm2browser/ removed';
+        await root.removeEntry('qtmap', { recursive: true });
+        installLog.innerHTML = '<span class="ok">OK</span>   /qtmap/ removed';
       } catch (e) {
         if (e.name === 'NotFoundError') {
           installLog.innerHTML = '<span class="muted">already empty</span>';
@@ -850,7 +850,7 @@
         `<span class="ok">OK</span>   wrote ${installedFiles + 1} files (${mib} MiB) to OPFS in ${dt.toFixed(1)} s\n` +
         `      avg throughput: ${((totalBytes / (1024 * 1024)) / dt).toFixed(1)} MiB/s\n` +
         `      reference.json sha256 = ${manifestSha}\n` +
-        `      OPFS path = /qtqc-mm2browser/references/mm39/\n` +
+        `      OPFS path = /qtmap/references/mm39/\n` +
         `      Switch Section 7 reference selector to "mm39" and drop the 5KSR46 fastq.`;
     } catch (e) {
       mm39InstallLog.innerHTML = `<span class="err">FAIL</span> ${e.message ?? e}\n${e.stack ?? ''}`;
@@ -869,10 +869,10 @@
         return;
       }
       const root = await navigator.storage.getDirectory();
-      const app = await root.getDirectoryHandle('qtqc-mm2browser');
+      const app = await root.getDirectoryHandle('qtmap');
       const refs = await app.getDirectoryHandle('references');
       await refs.removeEntry('mm39', { recursive: true });
-      mm39InstallLog.innerHTML = '<span class="ok">OK</span>   /qtqc-mm2browser/references/mm39/ removed';
+      mm39InstallLog.innerHTML = '<span class="ok">OK</span>   /qtmap/references/mm39/ removed';
     } catch (e) {
       mm39InstallLog.innerHTML = `<span class="err">FAIL</span> ${e.message ?? e}`;
     }
@@ -891,7 +891,7 @@
    * undelivered bytes, writes each file as soon as we have all its bytes.
    *
    * Sync access handle writes (Safari-portable). Files are created in
-   * /qtqc-mm2browser/references/<refId>/.
+   * /qtmap/references/<refId>/.
    */
   function makeQpackWorker() {
     const src = `
@@ -909,7 +909,7 @@
 
       async function ensureRefDir(refId) {
         const root = await navigator.storage.getDirectory();
-        const app = await root.getDirectoryHandle('qtqc-mm2browser', { create: true });
+        const app = await root.getDirectoryHandle('qtmap', { create: true });
         const refs = await app.getDirectoryHandle('references', { create: true });
         // Wipe any prior install to avoid 'open Access Handle' conflicts
         // when a previous Section 7/8 worker hasn't fully released its
@@ -939,7 +939,7 @@
         if (buf.length < QPACK_HEADER_SIZE) return false;
         const v = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
         const magic = String.fromCharCode(...buf.subarray(0, 8));
-        if (magic !== 'QTQCPACK') throw new Error('bad qpack magic: ' + JSON.stringify(magic));
+        if (magic !== 'QTMAPPAK') throw new Error('bad qpack magic: ' + JSON.stringify(magic));
         const version = v.getUint32(8, true);
         if (version !== 1) throw new Error('unsupported qpack version ' + version);
         const fileCount = v.getUint32(16, true);
@@ -1104,7 +1104,7 @@
       qpackInstallLog.innerHTML =
         `<span class="ok">OK</span>   wrote ${result.filesDone} files (${mib} MiB) to OPFS in ${dt.toFixed(1)} s\n` +
         `      avg throughput: ${(result.bytesReceived / (1024 * 1024) / dt).toFixed(1)} MiB/s\n` +
-        `      OPFS path = /qtqc-mm2browser/references/mm39/\n` +
+        `      OPFS path = /qtmap/references/mm39/\n` +
         `      Switch Section 7 reference selector to "mm39" and drop the 5KSR46 fastq.`;
     } catch (e) {
       qpackInstallLog.innerHTML = `<span class="err">FAIL</span> ${e.message ?? e}\n${e.stack ?? ''}`;
@@ -1125,7 +1125,7 @@
         const { granularities, iterationsPerGranularity, refId } = ev.data;
         try {
           const root = await navigator.storage.getDirectory();
-          const app = await root.getDirectoryHandle('qtqc-mm2browser');
+          const app = await root.getDirectoryHandle('qtmap');
           const refs = await app.getDirectoryHandle('references');
           const refDir = await refs.getDirectoryHandle(refId);
 

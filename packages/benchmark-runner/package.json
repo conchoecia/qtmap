@@ -1,5 +1,5 @@
 {
-  "name": "@qtqc/benchmark-runner",
+  "name": "@qtmap/benchmark-runner",
   "version": "0.0.0",
   "private": true,
   "description": "Node + Playwright harness. Drives Chrome and Firefox through identical mapping runs and emits comparison TSV against native minimap2, qtqc-minimap2-wasm, and chromap.",

@@ -45,7 +45,7 @@ test('WASM extractMinimizers produces deterministic output', async () => {
 });
 
 test('WASM minimizer set matches C native CLI on synthetic FASTA', async () => {
-  // Strategy: build a tiny FASTA, run qtqc-mm2-index against it (small
+  // Strategy: build a tiny FASTA, run qtmap-index against it (small
   // shard-bits so the binary fits one shard), then read back the shard's
   // hit table and compare every (contig, pos, strand) tuple to what the
   // WASM extractor produces directly on the same sequence.
@@ -64,7 +64,7 @@ test('WASM minimizer set matches C native CLI on synthetic FASTA', async () => {
     writeFileSync(fastaPath, `>tiny\n${seq}\n`);
     mkdirSync(outDir);
 
-    const cli = join(REPO_ROOT, 'build', 'packages', 'seed-core', 'qtqc-mm2-index');
+    const cli = join(REPO_ROOT, 'build', 'packages', 'seed-core', 'qtmap-index');
     execFileSync(cli, [
       '--in', fastaPath,
       '--out', outDir,
