@@ -1,0 +1,53 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build-test:
+    name: build + test
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install Emscripten
+        uses: mymindstorm/setup-emsdk@v14
+        with:
+          version: 'latest'
+          actions-cache-folder: 'emsdk-cache'
+
+      - name: Configure CMake (native)
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build native CLI + tests
+        run: cmake --build build -j
+
+      - name: Run C tests (ctest)
+        run: ctest --output-on-failure
+        working-directory: build
+
+      - name: Build WASM
+        run: bash scripts/build-wasm.sh
+
+      - name: Run JS tests
+        run: |
+          node --test \
+            packages/mapper-core/test/*.test.js \
+            packages/mapper-wasm/test/*.test.js \
+            packages/benchmark-runner/test/*.test.js
+
+      - name: Cross-organism regression (yeast sacCer3)
+        # Downloads ~12 MB FASTA from UCSC, builds + tests in ~30 s.
+        # Verifies windowExt / minScoreRatio / minMatchRate calibration
+        # constants haven't drifted on a 38 % GC organism.
+        run: bash scripts/cross-organism-test.sh
