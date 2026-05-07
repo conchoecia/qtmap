@@ -51,10 +51,10 @@
 
 Possible names:
 
-- `qtqc-mm2browser`
+- `qtmap`
 - `qtqc-browser-mapper`
 - `qtqc-qcmapper`
 - `qtqc-minimizer-qc`
 
-Recommended name for now: `qtqc-mm2browser`, because it clearly connects to the
+Recommended name for now: `qtmap`, because it clearly connects to the
 problem we are solving while leaving room to diverge from minimap2 internals.

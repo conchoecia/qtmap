@@ -74,7 +74,7 @@ export function buildCigar(rec, qLen, secondary) {
  * @param {Array<{name:string,length:number}>} contigs
  * @returns {string} including trailing \n
  */
-export function buildSamHeader(contigs, programLine = '@PG\tID:qtqc-mm2browser\tPN:qtqc-mm2browser\tVN:0.0.0') {
+export function buildSamHeader(contigs, programLine = '@PG\tID:qtmap\tPN:qtmap\tVN:0.0.0') {
   const lines = ['@HD\tVN:1.6\tSO:unsorted'];
   for (const c of contigs) {
     lines.push(`@SQ\tSN:${c.name}\tLN:${c.length}`);

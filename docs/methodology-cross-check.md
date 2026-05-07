@@ -34,7 +34,7 @@ thresholds, or how to handle multi-fragment reads.
    strict MAPQ > 30 cited in the paper applies only to the orthogonal MALBAC
    scWGS validation track.
 
-## Why this matters for qtqc-mm2browser
+## Why this matters for qtmap
 
 We are emitting SAM that downstream tooling (QTQC's `dipc-sam.js`,
 hickit, pairtools, pore_c) will consume. To stay compatible:

@@ -9,7 +9,7 @@
  *
  * Layout (all little-endian):
  *
- *   magic [8]            "QTQCPACK"
+ *   magic [8]            "QTMAPPAK"
  *   format_version u32   1
  *   reserved      u32
  *   file_count    u32
@@ -29,7 +29,7 @@
  *   concatenated file bytes, no padding
  */
 
-export const QPACK_MAGIC = 'QTQCPACK';
+export const QPACK_MAGIC = 'QTMAPPAK';
 export const QPACK_FORMAT_VERSION = 1;
 export const QPACK_HEADER_SIZE = 32;     // magic + version + reserved + count + data_offset + reserved2
 

@@ -1,7 +1,7 @@
 /**
  * @fileoverview TypeScript-friendly mirror of the C shard codec.
  *
- * Reads format-v2 binary shards produced by the qtqc-mm2-index CLI. Used
+ * Reads format-v2 binary shards produced by the qtmap-index CLI. Used
  * from both Node (for tests, golden compares) and the browser worker
  * (where ArrayBuffer is the input). All multi-byte integers are
  * little-endian; we use DataView with `littleEndian = true`.
@@ -9,7 +9,7 @@
  * Layout (mirrors packages/seed-core/include/qtqc/shard.h):
  *
  *   header   : 64 B
- *     magic[8]            "MM2BSHRD"
+ *     magic[8]            "QTMAPSHD"
  *     format_version u32  must be 2
  *     shard_id       u32
  *     seed_count     u32
@@ -30,7 +30,7 @@
  *     pos_strand_flags u32  (pos:28, strand:1, flags:3)
  */
 
-export const SHARD_MAGIC = 'MM2BSHRD';
+export const SHARD_MAGIC = 'QTMAPSHD';
 export const SHARD_FORMAT_VERSION = 2;
 export const HEADER_SIZE = 64;
 export const DIR_ENTRY_SIZE = 16;

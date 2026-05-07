@@ -1,7 +1,7 @@
 /**
  * @fileoverview contigs.bin reader.
  *
- * Layout (mirrors qtqc-mm2-index writer in src/cli/index_build.c):
+ * Layout (mirrors qtmap-index writer in src/cli/index_build.c):
  *
  *   header     : u32 contig_count, u32 reserved
  *   per-contig : u32 name_offset, u16 name_len, u16 reserved, u64 length

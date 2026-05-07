@@ -1,4 +1,4 @@
-# qtqc-mm2browser — Phase 3 Results (2026-05-06)
+# qtmap — Phase 3 Results (2026-05-06)
 
 This is a working browser-native long-read mapper for QTQC Dip-C QC. It
 replaces the minimap2-WASM `.mmi` load path that was pathologically slow
@@ -11,7 +11,7 @@ Pinned fixture: `fixtures/5KSR46_mm39_minimap2_ont/` (private, gitignored).
 5,000 ONT Dip-C reads, mouse mm39 reference, golden produced by
 `minimap2 v2.22 -ax map-ont` on 4 threads, 102 s wall, 9,135 alignments.
 
-| metric | qtqc-mm2browser | golden minimap2 | ratio |
+| metric | qtmap | golden minimap2 | ratio |
 |---|---|---|---|
 | **Hi-C contact pairs** | **960** | 953 | **100.7 %** |
 | Mapped reads | 4,868 | 4,808 | 101.2 % |
@@ -116,7 +116,7 @@ a higher cap. Already exposed via CLI.
 
 Single C11 source tree compiles to:
 
-- **Native CLI** `qtqc-mm2-index` (`scripts/build-native.sh`): builds
+- **Native CLI** `qtmap-index` (`scripts/build-native.sh`): builds
   reference index from FASTA. Distributed as pre-built binaries via
   GitHub releases for end users; source-builds with CMake + clang/gcc.
 - **WebAssembly** `seed_core.{js,wasm}` (`scripts/build-wasm.sh`): same
@@ -142,7 +142,7 @@ FASTQ → `extractMinimizers` (WASM) → `planShardBuckets` →
   Spearman, so reverted.
 - **hg38 reference**. Same pipeline, plan deferred until after mm39 is
   validated end to end. Now that it is, the recipe is:
-  `gunzip hg38.fa.gz && qtqc-mm2-index --in hg38.fa --out hg38_index/
+  `gunzip hg38.fa.gz && qtmap-index --in hg38.fa --out hg38_index/
   --w 15 --reference-id hg38 --taxid 9606 --freq-cap 1000`.
 - **WASM threads / SharedArrayBuffer**. MVP runs single-threaded inside
   one Web Worker. Cross-origin isolation (COOP/COEP) deployment cost
@@ -165,7 +165,7 @@ bash scripts/cross-organism-test.sh          # yeast PASS
 mkdir -p /tmp/mm39_build && \
   gunzip -c fixtures/5KSR46_mm39_minimap2_ont/reference/mm39.fa.gz \
     > /tmp/mm39_build/mm39.fa
-build/packages/seed-core/qtqc-mm2-index \
+build/packages/seed-core/qtmap-index \
   --in /tmp/mm39_build/mm39.fa --out /tmp/mm39_build/index \
   --shard-bits 12 --w 15 --reference-id mm39 --taxid 10090 --freq-cap 1000
 node packages/benchmark-runner/src/run-mapper.js \

@@ -1,5 +1,5 @@
 {
-  "name": "@qtqc/mapper-core",
+  "name": "@qtmap/mapper-core",
   "version": "0.0.0",
   "private": true,
   "description": "Pure-TypeScript core: shard codec mirror, query planner, SAM emitter, FASTA/FASTQ helpers. No browser APIs; usable from Node and from a worker.",

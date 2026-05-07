@@ -1,5 +1,5 @@
 {
-  "name": "@qtqc/mapper-worker",
+  "name": "@qtmap/mapper-worker",
   "version": "0.0.0",
   "private": true,
   "description": "Web Worker entry: OPFS shard loader, controller logic, multi-worker orchestration. Browser-only.",
@@ -11,7 +11,7 @@
     "./worker": "./src/worker.js"
   },
   "dependencies": {
-    "@qtqc/mapper-core": "*",
-    "@qtqc/mapper-wasm": "*"
+    "@qtmap/mapper-core": "*",
+    "@qtmap/mapper-wasm": "*"
   }
 }

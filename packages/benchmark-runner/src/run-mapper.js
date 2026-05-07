@@ -1,8 +1,8 @@
 /**
  * @fileoverview Node-side mapper driver.
  *
- * Streams a FASTQ through @qtqc/mapper-core's mapReads orchestrator,
- * backed by a disk-resident shard index produced by qtqc-mm2-index.
+ * Streams a FASTQ through @qtmap/mapper-core's mapReads orchestrator,
+ * backed by a disk-resident shard index produced by qtmap-index.
  * Writes SAM body to a file or stdout.
  *
  * Usage:

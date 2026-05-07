@@ -12,10 +12,10 @@
 #include <time.h>
 
 /*
- * qtqc-mm2-index — offline index builder for the browser mapper.
+ * qtmap-index — offline index builder for the browser mapper.
  *
  * Usage:
- *   qtqc-mm2-index --in REF.fa --out DIR [--k 15] [--w 10] [--shard-bits 12]
+ *   qtmap-index --in REF.fa --out DIR [--k 15] [--w 10] [--shard-bits 12]
  *                  [--reference-id mm39] [--taxid 10090] [--freq-cap 1000]
  *
  * Outputs into DIR:
@@ -66,7 +66,7 @@ typedef struct {
 } build_ctx_t;
 
 static void die(const char *msg) {
-    fprintf(stderr, "qtqc-mm2-index: %s\n", msg);
+    fprintf(stderr, "qtmap-index: %s\n", msg);
     exit(2);
 }
 
@@ -240,7 +240,7 @@ err:
 
 static void usage(void) {
     fprintf(stderr,
-        "usage: qtqc-mm2-index --in REF.fa --out DIR\n"
+        "usage: qtmap-index --in REF.fa --out DIR\n"
         "                      [--k 15] [--w 10] [--shard-bits 12]\n"
         "                      [--reference-id ID] [--taxid N] [--freq-cap 1000]\n"
         "                      [--store-sequence]\n"
@@ -285,7 +285,7 @@ int main(int argc, char **argv) {
     ctx.shards = (shard_buf_t *)calloc(ctx.shard_n, sizeof(*ctx.shards));
     if (!ctx.shards) die("alloc shards");
 
-    fprintf(stderr, "[qtqc-mm2-index] reading %s ...\n", in_path);
+    fprintf(stderr, "[qtmap-index] reading %s ...\n", in_path);
     clock_t t0 = clock();
 
     if (ctx.store_sequence) {
@@ -302,7 +302,7 @@ int main(int argc, char **argv) {
 
     if (ctx.seq_fp) { fclose(ctx.seq_fp); ctx.seq_fp = NULL; }
 
-    fprintf(stderr, "[qtqc-mm2-index] %zu contigs, building shards ...\n", ctx.contig_n);
+    fprintf(stderr, "[qtmap-index] %zu contigs, building shards ...\n", ctx.contig_n);
 
     /* Sort + write each shard. */
     manifest_file_t *files = (manifest_file_t *)calloc(
@@ -403,7 +403,7 @@ int main(int argc, char **argv) {
     if (!jf) die("open reference.json for write");
 
     fprintf(jf, "{\n");
-    fprintf(jf, "  \"format\": \"qtqc-mm2browser-reference\",\n");
+    fprintf(jf, "  \"format\": \"qtmap-reference\",\n");
     fprintf(jf, "  \"formatVersion\": 1,\n");
     fprintf(jf, "  \"referenceId\": \"%s\",\n", reference_id);
     fprintf(jf, "  \"taxid\": %d,\n", taxid);
@@ -432,7 +432,7 @@ int main(int argc, char **argv) {
 
     double secs = (double)(clock() - t0) / (double)CLOCKS_PER_SEC;
     fprintf(stderr,
-        "[qtqc-mm2-index] done. %zu contigs, %" PRIu64 " hits across %zu shards"
+        "[qtmap-index] done. %zu contigs, %" PRIu64 " hits across %zu shards"
         " (%" PRIu64 " distinct seeds, %" PRIu64 " hits dropped by freq cap)"
         " in %.2fs\n",
         ctx.contig_n, total_hits, ctx.shard_n,
