@@ -165,7 +165,11 @@ export async function diffSam(oursPath, goldenPath, opts = {}) {
   const union = new Set([...oursMapped, ...goldenMapped]);
   const mappedJaccard = union.size === 0 ? 0 : inter.size / union.size;
 
-  // Per-read segment alignment.
+  // Per-read segment alignment via greedy nearest-placement matching.
+  // We pair each "ours" record to the closest unused "golden" record on the
+  // same (refName, strand). qStart-rank pairing fails because chain
+  // endpoints between our mapper and minimap2 produce different qStart
+  // values for the same true placement.
   let placementsCompared = 0;
   let placementsMatched = 0;
   const mapqOurs = [];
@@ -173,18 +177,33 @@ export async function diffSam(oursPath, goldenPath, opts = {}) {
   for (const name of inter) {
     const a = ours.get(name).records;
     const b = golden.get(name).records;
-    // Pair by qStart-rank within the read.
-    const n = Math.min(a.length, b.length);
-    for (let i = 0; i < n; ++i) {
+    const usedB = new Uint8Array(b.length);
+
+    // For each ours record, scan goldens for same (ref, strand) and pick
+    // the unused one with the smallest |pos diff|.
+    for (const ar of a) {
+      let bestIdx = -1;
+      let bestDist = Infinity;
+      for (let j = 0; j < b.length; ++j) {
+        if (usedB[j]) continue;
+        if (ar.refName !== b[j].refName) continue;
+        if (ar.reverse !== b[j].reverse) continue;
+        const d = Math.abs(ar.pos0 - b[j].pos0);
+        if (d < bestDist) { bestDist = d; bestIdx = j; }
+      }
+      if (bestIdx === -1) continue;     // no candidate of right ref+strand
+      usedB[bestIdx] = 1;
       placementsCompared++;
-      if (a[i].refName === b[i].refName
-          && a[i].reverse === b[i].reverse
-          && Math.abs(a[i].pos0 - b[i].pos0) <= tolerance) {
+      if (bestDist <= tolerance) {
         placementsMatched++;
-        mapqOurs.push(a[i].mapq);
-        mapqGolden.push(b[i].mapq);
+        mapqOurs.push(ar.mapq);
+        mapqGolden.push(b[bestIdx].mapq);
       }
     }
+    // Records on either side without a partner (e.g. ours emitted on a
+    // contig golden didn't, or golden has 3 supps when ours has 2) are
+    // silently dropped from the rate. Count them in unmatchedOurs /
+    // unmatchedGolden if useful later.
   }
 
   return {
