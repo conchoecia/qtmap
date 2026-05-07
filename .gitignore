@@ -10,8 +10,6 @@ build-*/
 dist/
 *.wasm
 *.wasm.map
-packages/*/dist/
-packages/mapper-wasm/seed_core.*
 
 # Node
 node_modules/
