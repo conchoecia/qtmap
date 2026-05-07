@@ -23,6 +23,16 @@
 const QUERY_OVERLAP_TOLERANCE = 20;
 const SECONDARY_QSPAN_OVERLAP = 0.8;
 
+/* Minimum thresholds for a chain to be promoted to a fragment.
+ *
+ * minimap2 default minimum chain length / score is ~k+1 (15+1=16 bp). We
+ * are more conservative because Hi-C concatamer reads have many spurious
+ * minimizer matches in repeats; without a floor the SAM blows up with
+ * tiny supplementary records that minimap2 would never emit. */
+const DEFAULT_MIN_REF_SPAN = 40;
+const DEFAULT_MIN_ANCHOR_COUNT = 3;
+const DEFAULT_MIN_SCORE_RATIO = 0.4;
+
 /**
  * Select fragment placements for one read from a list of candidate chains.
  *
@@ -45,11 +55,20 @@ const SECONDARY_QSPAN_OVERLAP = 0.8;
 export function selectFragments(chains, opts = {}) {
   const secondary = opts.secondary ?? 0;
   const tol = opts.overlapTolerance ?? QUERY_OVERLAP_TOLERANCE;
+  const minRefSpan = opts.minRefSpan ?? DEFAULT_MIN_REF_SPAN;
+  const minAnchorCount = opts.minAnchorCount ?? DEFAULT_MIN_ANCHOR_COUNT;
+  const minScoreRatio = opts.minScoreRatio ?? DEFAULT_MIN_SCORE_RATIO;
 
   if (chains.length === 0) return [];
 
   // Sort by descending score (defensive — chainAnchors already does this).
   const sorted = [...chains].sort((a, b) => b.score - a.score);
+
+  // The best chain's score is the reference for the score-ratio filter. We
+  // also use it as the minimum fragment score floor so we never emit a
+  // sub-threshold sliver as a "fragment" alongside a real alignment.
+  const bestScore = sorted[0].score;
+  const minFragmentScore = bestScore * minScoreRatio;
 
   // Step 1: greedy non-overlapping fragment picks by qSpan.
   const fragments = [];           // accepted fragments in selection order
@@ -57,17 +76,25 @@ export function selectFragments(chains, opts = {}) {
   const altsByFragment = new Map(); // fragmentIndex -> alternate chains
 
   for (const c of sorted) {
+    const refSpan = c.refEnd - c.refStart;
+    const tooShort = refSpan < minRefSpan;
+    const tooFew = c.anchorCount < minAnchorCount;
+    const tooLow = c.score < minFragmentScore;
+
     const ovIdx = findOverlap(c, usedRanges, tol);
     if (ovIdx === -1) {
-      // Accept as a new fragment.
+      // Candidate new fragment. Apply size + score floors.
+      if (tooShort || tooFew || tooLow) continue;
       fragments.push(c);
       usedRanges.push({ qStart: c.qStart, qEnd: c.qEnd });
       altsByFragment.set(fragments.length - 1, []);
     } else {
       // Overlaps an existing fragment: candidate secondary alternate.
+      // Alternates use a looser refSpan/anchor floor because they are
+      // reporting the same query region, just at a different placement.
       const fragment = fragments[ovIdx];
       const ovFrac = qSpanOverlapFraction(c, fragment);
-      if (ovFrac >= SECONDARY_QSPAN_OVERLAP) {
+      if (ovFrac >= SECONDARY_QSPAN_OVERLAP && c.anchorCount >= minAnchorCount) {
         altsByFragment.get(ovIdx).push(c);
       }
     }
