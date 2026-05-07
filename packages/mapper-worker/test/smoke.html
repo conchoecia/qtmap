@@ -1067,7 +1067,15 @@
         }
       }
 
-      self.onmessage = async (ev) => {
+      // Serialize message handling. async self.onmessage doesn't block
+      // the next message dispatch, so concurrent 'chunk' events would
+      // race on shared state (buf, nextFileIdx, sync-handle creation),
+      // producing 'NoModificationAllowedError' even on fresh OPFS dirs.
+      // Chain every message through a single promise so they run in order.
+      let chain = Promise.resolve();
+      const enqueue = (ev) => { chain = chain.then(() => handle(ev)); };
+
+      async function handle(ev) {
         const m = ev.data;
         try {
           if (m.command === 'init') {
@@ -1098,7 +1106,9 @@
         } catch (e) {
           self.postMessage({ type: 'error', error: String(e?.message ?? e), stack: e?.stack });
         }
-      };
+      }
+
+      self.onmessage = enqueue;
     `;
     const blob = new Blob([src], { type: 'application/javascript' });
     return new Worker(URL.createObjectURL(blob), { type: 'classic' });
