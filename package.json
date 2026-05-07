@@ -1,0 +1,26 @@
+{
+  "name": "qtqc-mm2browser",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Browser-native long-read mapper for QTQC Dip-C QC. Hash-prefix-sharded minimizer index, OPFS-backed, single C source compiled to native CLI + WebAssembly.",
+  "license": "MIT",
+  "workspaces": [
+    "packages/seed-core",
+    "packages/mapper-wasm",
+    "packages/mapper-core",
+    "packages/mapper-worker",
+    "packages/benchmark-runner"
+  ],
+  "scripts": {
+    "build:native": "scripts/build-native.sh",
+    "build:wasm": "scripts/build-wasm.sh",
+    "test": "node --test test/*.test.js && cd build && ctest --output-on-failure",
+    "test:c": "cd build && ctest --output-on-failure",
+    "test:js": "node --test test/*.test.js",
+    "check": "node --check packages/*/src/*.js test/*.js 2>/dev/null || true"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
