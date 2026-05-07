@@ -1,0 +1,16 @@
+{
+  "name": "@qtqc/mapper-wasm",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Emscripten-built WebAssembly artifacts (seed_core.js, seed_core.wasm) and TypeScript bindings for the seed-core C library.",
+  "license": "MIT",
+  "type": "module",
+  "main": "./dist/seed_core.js",
+  "types": "./dist/seed_core.d.ts",
+  "files": [
+    "dist/"
+  ],
+  "scripts": {
+    "build": "echo 'Run scripts/build-wasm.sh from repo root to populate dist/'"
+  }
+}
