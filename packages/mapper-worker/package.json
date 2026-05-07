@@ -1,0 +1,17 @@
+{
+  "name": "@qtqc/mapper-worker",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Web Worker entry: OPFS shard loader, controller logic, multi-worker orchestration. Browser-only.",
+  "license": "MIT",
+  "type": "module",
+  "main": "./src/index.js",
+  "exports": {
+    ".": "./src/index.js",
+    "./worker": "./src/worker.js"
+  },
+  "dependencies": {
+    "@qtqc/mapper-core": "*",
+    "@qtqc/mapper-wasm": "*"
+  }
+}
