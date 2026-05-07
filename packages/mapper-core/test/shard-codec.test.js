@@ -107,7 +107,7 @@ test('decodeHit unpacks pos/strand/flags correctly', () => {
   for (let i = 0; i < firstSeed.hitCount; ++i) {
     const off = hitsByteOffset + (firstSeed.hitOffset + i) * HIT_RECORD_SIZE;
     const hit = decodeHit(buf, off);
-    assert.ok(hit.contigId < 256, 'contig_id must fit in 8 bits');
+    assert.ok(hit.contigId < 65536, 'contig_id must fit in 16 bits');
     assert.ok(hit.pos < (1 << 28), 'pos must fit in 28 bits');
     assert.ok(hit.strand === 0 || hit.strand === 1);
     assert.ok(hit.flags >= 0 && hit.flags < 8, 'flags 3 bits');

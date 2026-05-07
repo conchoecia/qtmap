@@ -50,6 +50,7 @@ typedef struct {
     int   w;
     int   shard_bits;
     uint32_t freq_cap;
+    int   store_sequence;     /* 0 / 1: emit sequence.bin (2-bit packed) */
 
     contig_t *contigs;
     size_t    contig_n;
@@ -60,6 +61,8 @@ typedef struct {
 
     qtqc_minimizer_t *mz_buf;
     size_t            mz_cap;
+
+    FILE *seq_fp;             /* open if store_sequence is set */
 } build_ctx_t;
 
 static void die(const char *msg) {
@@ -109,6 +112,35 @@ static int on_contig(void *user, uint32_t contig_id,
     if (!ctx->contigs[ctx->contig_n].name) return -1;
     ctx->contigs[ctx->contig_n].length = seq_len;
     ++ctx->contig_n;
+
+    /*
+     * Pack contig sequence into the 2-bit `sequence.bin` blob. ACGT -> 0..3,
+     * everything else -> 0 (treated as A; rare and the banded extension
+     * tolerates a few mismatches anyway). Packing is little-endian within
+     * the byte: base 0 lives in bits [0..1], base 1 in bits [2..3], etc.
+     * Trailing pad bits in the last byte are zero.
+     */
+    if (ctx->seq_fp) {
+        const size_t pack_len = (seq_len + 3) / 4;
+        unsigned char *packed = (unsigned char *)calloc(pack_len, 1);
+        if (!packed) return -1;
+        for (size_t i = 0; i < seq_len; ++i) {
+            unsigned char v = 0;
+            switch (seq[i]) {
+            case 'A': case 'a': v = 0; break;
+            case 'C': case 'c': v = 1; break;
+            case 'G': case 'g': v = 2; break;
+            case 'T': case 't': v = 3; break;
+            default:            v = 0; break;
+            }
+            packed[i >> 2] |= (unsigned char)(v << ((i & 3) << 1));
+        }
+        if (fwrite(packed, 1, pack_len, ctx->seq_fp) != pack_len) {
+            free(packed);
+            return -1;
+        }
+        free(packed);
+    }
 
     if (seq_len < (size_t)ctx->k) return 0;
     if (reserve_mz(ctx, seq_len) < 0) return -1;
@@ -210,7 +242,11 @@ static void usage(void) {
     fprintf(stderr,
         "usage: qtqc-mm2-index --in REF.fa --out DIR\n"
         "                      [--k 15] [--w 10] [--shard-bits 12]\n"
-        "                      [--reference-id ID] [--taxid N] [--freq-cap 1000]\n");
+        "                      [--reference-id ID] [--taxid N] [--freq-cap 1000]\n"
+        "                      [--store-sequence]\n"
+        "  --store-sequence    emit `sequence.bin` (2-bit packed reference);\n"
+        "                      enables base-level chain-endpoint refinement\n"
+        "                      in the mapper. Adds ~length/4 bytes to index.\n");
     exit(2);
 }
 
@@ -236,6 +272,7 @@ int main(int argc, char **argv) {
         else if (!strcmp(a, "--reference-id")  && i + 1 < argc) reference_id = argv[++i];
         else if (!strcmp(a, "--taxid")         && i + 1 < argc) taxid = atoi(argv[++i]);
         else if (!strcmp(a, "--freq-cap")      && i + 1 < argc) ctx.freq_cap = (uint32_t)strtoul(argv[++i], NULL, 10);
+        else if (!strcmp(a, "--store-sequence")) ctx.store_sequence = 1;
         else { fprintf(stderr, "unknown arg: %s\n", a); usage(); }
     }
     if (!in_path || !out_dir) usage();
@@ -251,10 +288,19 @@ int main(int argc, char **argv) {
     fprintf(stderr, "[qtqc-mm2-index] reading %s ...\n", in_path);
     clock_t t0 = clock();
 
+    if (ctx.store_sequence) {
+        char path[1024];
+        snprintf(path, sizeof(path), "%s/sequence.bin", out_dir);
+        ctx.seq_fp = fopen(path, "wb");
+        if (!ctx.seq_fp) die("cannot open sequence.bin for write");
+    }
+
     FILE *fa = fopen(in_path, "rb");
     if (!fa) die("cannot open input FASTA");
     if (qtqc_fasta_iter(fa, on_contig, &ctx) < 0) die("FASTA iteration failed");
     fclose(fa);
+
+    if (ctx.seq_fp) { fclose(ctx.seq_fp); ctx.seq_fp = NULL; }
 
     fprintf(stderr, "[qtqc-mm2-index] %zu contigs, building shards ...\n", ctx.contig_n);
 
@@ -313,8 +359,8 @@ int main(int argc, char **argv) {
                     dir[dir_n].hit_offset = 0; /* recomputed in writer */
                     dir[dir_n].count_and_flags = qtqc_pack_count_and_flags(cnt, 0);
                     for (size_t r = i; r < j; ++r) {
-                        if (s->recs[r].contig_id > 0xFFu) {
-                            die("contig_id exceeds 8-bit cap (drop alts before build)");
+                        if (s->recs[r].contig_id > 0xFFFFu) {
+                            die("contig_id exceeds 16-bit cap (>65k contigs)");
                         }
                         hits[hit_n].contig_id = (uint16_t)s->recs[r].contig_id;
                         hits[hit_n].pos_strand_flags = qtqc_pack_pos_strand_flags(

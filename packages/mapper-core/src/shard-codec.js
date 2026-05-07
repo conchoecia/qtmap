@@ -96,7 +96,9 @@ export function parseShardHeader(buffer, offset = 0) {
  */
 export function decodeHit(buffer, offset) {
   const view = bufferDataView(buffer);
-  const contigId = view.getUint16(offset, true) & 0xFF;
+  // contig_id is the full 16 bits since the index format spec
+  // bumped to allow up to 65 k contigs (hg38 alt scaffolds count > 256).
+  const contigId = view.getUint16(offset, true);
   const psf = view.getUint32(offset + 2, true);
   return {
     contigId,
