@@ -38,8 +38,9 @@ mm39 (61 contigs, 2.5 Gbp):
 
 ## Cross-organism robustness
 
-S. cerevisiae sacCer3 (12.16 Mbp, 38.1 % GC) — verified via
-`scripts/cross-organism-test.sh`:
+### S. cerevisiae sacCer3 (12.16 Mbp, 38.1 % GC) — simulated cuts
+
+Verified via `scripts/cross-organism-test.sh`:
 
 | metric | result |
 |---|---|
@@ -50,9 +51,29 @@ S. cerevisiae sacCer3 (12.16 Mbp, 38.1 % GC) — verified via
 | Placement @±50 bp | 97.0 % |
 | Map wall (200 reads) | 0.17 s |
 
+### hg38 (3.0 Gbp, 41 % GC) — real ONT (QDYBSX_2_DS389)
+
+Native minimap2 v2.22 -ax map-ont golden produced on Stanford Sherlock
+(8 threads, 86 s wall, 11.9 GiB peak RSS). Our mapper run with
+`--store-sequence` index + base-level chain-endpoint refinement on:
+
+| metric | ours | golden | ratio |
+|---|---|---|---|
+| Index build wall | 175 s | — | — |
+| Index size on disk | 3.8 GiB (incl. 802 MB sequence.bin) | — | — |
+| **Hi-C contact pairs** | **865** | **893** | **96.9 %** |
+| Mapped reads | 4,085 | 3,980 | 102.6 % |
+| Mapped-set Jaccard | 0.970 | — | — |
+| SAM records | 6,260 | 8,257 | 75.8 % (golden emits more secondaries) |
+| Placement @±10 bp | 91.65 % | — | — |
+| Placement @±20 bp | 95.0 % | — | — |
+| Placement @±50 bp | 97.5 % | — | — |
+| Wall time, single thread | **24.9 s** | 86 s on 8 threads | 7×/thread faster |
+
 The same calibration constants that hit 100.7 % on mm39 (42 % GC, ONT
-noise) hit 95 % at ±10 bp on sacCer3 (38 % GC, clean cuts). GC content
-has no measurable effect.
+noise) hit 95 % at ±10 bp on sacCer3 (38 % GC, clean cuts) and 91.65 %
+at ±10 bp on QDYBSX/hg38 (41 % GC, real ONT). GC content has no
+measurable effect.
 
 ## Browser support
 
@@ -83,6 +104,9 @@ All three are organism-agnostic (independent of GC / repeat content):
 | `minRefSpan` (fragment-select.js) | 40 | drop chains with refSpan < 40 bp |
 | `minAnchorCount` (fragment-select.js) | 3 | drop chains with < 3 anchors |
 | `freq-cap` (CLI flag) | 1000 | drop seeds occurring >1000 times reference-wide |
+| `--store-sequence` (CLI flag) | off by default | emit 2-bit packed sequence.bin (~length / 4 bytes) so the mapper can do base-level chain-endpoint refinement |
+| `windowSize` / `minMatchRate` (endpoint-refine.js) | 10 / 0.6 | sliding window over which to compute match rate when extending; stop when window match rate drops below 60 % |
+| `maxExt` (endpoint-refine.js) | 40 | max bp to extend per side |
 
 `freq-cap` is the only one that may need per-organism tuning: very
 repeat-rich genomes (Plasmodium AT-tracts, plant centromeres) may need
