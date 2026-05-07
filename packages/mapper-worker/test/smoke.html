@@ -98,6 +98,18 @@
   <pre id="map-sam-preview" style="font-size: 0.78rem;">—</pre>
 </details>
 
+<h2>9. Install mm39 from a single .qpack file (recommended for end users)</h2>
+<p class="muted">
+  Streams a single packed file (mm39_w15.qpack, ~3.4 GB) into OPFS.
+  Same end-state as Section 8 but the user only downloads ONE file
+  instead of 4099. Uses fetch + ReadableStream + dedicated-worker
+  sync-handle writes; works in all three browsers.
+</p>
+<div class="row">
+  <button id="qpack-install-btn">Install from .qpack</button>
+</div>
+<pre id="qpack-install-log">— click to install</pre>
+
 <h2>8. Install mm39 mouse reference into OPFS (~3.9 GB, one-time)</h2>
 <p class="muted">
   Streams all 4096 shards from <code>/tmp/mm39_build/index/</code> (served
@@ -863,6 +875,213 @@
       mm39InstallLog.innerHTML = '<span class="ok">OK</span>   /qtqc-mm2browser/references/mm39/ removed';
     } catch (e) {
       mm39InstallLog.innerHTML = `<span class="err">FAIL</span> ${e.message ?? e}`;
+    }
+  });
+
+  /* ----- Section 9: install from .qpack (single-file bundle) ---------- */
+
+  const qpackInstallBtn = document.getElementById('qpack-install-btn');
+  const qpackInstallLog = document.getElementById('qpack-install-log');
+
+  /**
+   * Streaming qpack installer worker.
+   *
+   * Receives chunks of the .qpack response body and an immediate notice
+   * when the file table has been parsed. Maintains a small ring buffer of
+   * undelivered bytes, writes each file as soon as we have all its bytes.
+   *
+   * Sync access handle writes (Safari-portable). Files are created in
+   * /qtqc-mm2browser/references/<refId>/.
+   */
+  function makeQpackWorker() {
+    const src = `
+      const QPACK_HEADER_SIZE = 32;
+      let refId = null;
+      let refDir = null;
+      let table = null;       // [{ path, size, offset }]
+      let dataOffset = 0;
+      let bytesReceived = 0;  // total bytes from the network so far
+      let nextFileIdx = 0;
+      let bufStart = 0;
+      let buf = new Uint8Array(0);  // pending bytes (those past where we've written)
+
+      async function ensureRefDir(refId) {
+        const root = await navigator.storage.getDirectory();
+        const app = await root.getDirectoryHandle('qtqc-mm2browser', { create: true });
+        const refs = await app.getDirectoryHandle('references', { create: true });
+        return refs.getDirectoryHandle(refId, { create: true });
+      }
+
+      function appendBuf(chunk) {
+        const next = new Uint8Array(buf.length + chunk.length);
+        next.set(buf, 0);
+        next.set(chunk, buf.length);
+        buf = next;
+      }
+
+      async function tryParseHeader() {
+        // Need full header + file table.
+        if (buf.length < QPACK_HEADER_SIZE) return false;
+        const v = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
+        const magic = String.fromCharCode(...buf.subarray(0, 8));
+        if (magic !== 'QTQCPACK') throw new Error('bad qpack magic: ' + JSON.stringify(magic));
+        const version = v.getUint32(8, true);
+        if (version !== 1) throw new Error('unsupported qpack version ' + version);
+        const fileCount = v.getUint32(16, true);
+        dataOffset = Number(v.getBigUint64(24, true));
+        if (buf.length < dataOffset) return false;
+
+        table = new Array(fileCount);
+        let cursor = QPACK_HEADER_SIZE;
+        const decoder = new TextDecoder();
+        for (let i = 0; i < fileCount; ++i) {
+          const pathLen = v.getUint16(cursor, true);
+          cursor += 4;                                // path_len + reserved
+          const size = Number(v.getBigUint64(cursor, true));
+          cursor += 8;
+          const offset = Number(v.getBigUint64(cursor, true));
+          cursor += 8;
+          cursor += 32;                                // sha256 (skip)
+          const path = decoder.decode(buf.subarray(cursor, cursor + pathLen));
+          cursor += pathLen;
+          table[i] = { path, size, offset };
+        }
+        // Trim buf to start at dataOffset.
+        buf = buf.subarray(dataOffset);
+        bufStart = dataOffset;
+        return true;
+      }
+
+      async function writeFileFromBuf(file) {
+        // Slice [file.offset, file.offset+file.size) out of bufStart-relative buf.
+        const localStart = file.offset - (bufStart - dataOffset);
+        if (localStart < 0) throw new Error('file ' + file.path + ' starts before bufStart; bug');
+        const slice = buf.slice(localStart, localStart + file.size);
+        if (slice.length !== file.size) throw new Error('bad slice for ' + file.path);
+        const fh = await refDir.getFileHandle(file.path, { create: true });
+        const sah = await fh.createSyncAccessHandle({ mode: 'readwrite' });
+        try {
+          sah.truncate(0);
+          const written = sah.write(slice, { at: 0 });
+          if (written !== file.size) throw new Error('short write on ' + file.path);
+          sah.flush();
+        } finally {
+          sah.close();
+        }
+      }
+
+      async function flushReadyFiles() {
+        // While the next file is fully present in buf, write it and advance.
+        while (nextFileIdx < table.length) {
+          const file = table[nextFileIdx];
+          const localEnd = (file.offset + file.size) - (bufStart - dataOffset);
+          if (localEnd > buf.length) break;          // need more bytes
+          await writeFileFromBuf(file);
+          // Advance bufStart to the END of the file we just wrote so we
+          // can drop those bytes.
+          const dropTo = (file.offset + file.size);
+          const localDrop = dropTo - (bufStart - dataOffset);
+          buf = buf.subarray(localDrop);
+          bufStart = dataOffset + dropTo;
+          nextFileIdx++;
+          if (nextFileIdx % 256 === 0 || nextFileIdx === table.length) {
+            self.postMessage({ type: 'progress', filesDone: nextFileIdx, totalFiles: table.length, bytesReceived });
+          }
+        }
+      }
+
+      self.onmessage = async (ev) => {
+        const m = ev.data;
+        try {
+          if (m.command === 'init') {
+            refId = m.refId;
+            refDir = await ensureRefDir(refId);
+            self.postMessage({ type: 'ready' });
+          } else if (m.command === 'chunk') {
+            bytesReceived += m.chunk.byteLength;
+            appendBuf(new Uint8Array(m.chunk));
+            if (!table) {
+              const ok = await tryParseHeader();
+              if (ok) self.postMessage({ type: 'header', fileCount: table.length, dataOffset });
+            }
+            if (table) await flushReadyFiles();
+          } else if (m.command === 'finish') {
+            // Write final marker file.
+            const marker = JSON.stringify({ completedAt: new Date().toISOString(), source: 'qpack' });
+            const fh = await refDir.getFileHandle('.install-marker.json', { create: true });
+            const sah = await fh.createSyncAccessHandle({ mode: 'readwrite' });
+            try {
+              sah.truncate(0);
+              sah.write(new TextEncoder().encode(marker), { at: 0 });
+              sah.flush();
+            } finally { sah.close(); }
+            self.postMessage({ type: 'done', filesDone: nextFileIdx, bytesReceived });
+            self.close();
+          }
+        } catch (e) {
+          self.postMessage({ type: 'error', error: String(e?.message ?? e), stack: e?.stack });
+        }
+      };
+    `;
+    const blob = new Blob([src], { type: 'application/javascript' });
+    return new Worker(URL.createObjectURL(blob), { type: 'classic' });
+  }
+
+  qpackInstallBtn.addEventListener('click', async () => {
+    qpackInstallLog.textContent = 'opening stream…';
+    const worker = makeQpackWorker();
+    try {
+      const t0 = performance.now();
+      await new Promise((resolve, reject) => {
+        worker.onmessage = (ev) => ev.data.type === 'ready' ? resolve() : null;
+        worker.onerror = (e) => reject(new Error(`worker init: ${e.message}`));
+        worker.postMessage({ command: 'init', refId: 'mm39' });
+      });
+
+      const url = '../../../fixtures/local/mm39_w15.qpack';
+      const resp = await fetch(url);
+      if (!resp.ok) throw new Error(`HTTP ${resp.status} fetching ${url}`);
+      const total = Number(resp.headers.get('Content-Length') || 0);
+      const reader = resp.body.getReader();
+
+      worker.onmessage = (ev) => {
+        const m = ev.data;
+        if (m.type === 'progress') {
+          const pct = total > 0 ? (m.bytesReceived / total * 100).toFixed(1) : '?';
+          const mibps = (m.bytesReceived / (1024 * 1024)) / ((performance.now() - t0) / 1000);
+          qpackInstallLog.textContent =
+            `streaming… ${m.filesDone}/${m.totalFiles} files written, ` +
+            `${(m.bytesReceived / (1024**2)).toFixed(0)} MiB / ${(total / (1024**2)).toFixed(0)} MiB ` +
+            `(${pct}%, ${mibps.toFixed(1)} MiB/s)`;
+        } else if (m.type === 'header') {
+          qpackInstallLog.textContent = `header parsed: ${m.fileCount} files`;
+        } else if (m.type === 'error') {
+          qpackInstallLog.innerHTML = `<span class="err">FAIL</span> ${m.error}\n${m.stack ?? ''}`;
+        }
+      };
+
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        worker.postMessage({ command: 'chunk', chunk: value.buffer }, [value.buffer]);
+      }
+
+      const result = await new Promise((resolve, reject) => {
+        worker.onmessage = (ev) => ev.data.type === 'done' ? resolve(ev.data)
+          : ev.data.type === 'error' ? reject(new Error(ev.data.error)) : null;
+        worker.postMessage({ command: 'finish' });
+      });
+
+      const dt = (performance.now() - t0) / 1000;
+      const mib = (result.bytesReceived / (1024 * 1024)).toFixed(0);
+      qpackInstallLog.innerHTML =
+        `<span class="ok">OK</span>   wrote ${result.filesDone} files (${mib} MiB) to OPFS in ${dt.toFixed(1)} s\n` +
+        `      avg throughput: ${(result.bytesReceived / (1024 * 1024) / dt).toFixed(1)} MiB/s\n` +
+        `      OPFS path = /qtqc-mm2browser/references/mm39/\n` +
+        `      Switch Section 7 reference selector to "mm39" and drop the 5KSR46 fastq.`;
+    } catch (e) {
+      qpackInstallLog.innerHTML = `<span class="err">FAIL</span> ${e.message ?? e}\n${e.stack ?? ''}`;
+      throw e;
     }
   });
 
