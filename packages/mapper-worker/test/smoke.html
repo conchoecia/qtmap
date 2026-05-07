@@ -73,7 +73,7 @@
 <p class="muted">
   Writes the same shard set into <code>/qtmap/references/synth/</code>
   in the Origin Private File System using the async <code>createWritable</code>
-  API. After install, Section 5 will read the shards back via dedicated-worker
+  API. After install, Section 9 will read the shards back via dedicated-worker
   <code>FileSystemSyncAccessHandle</code> for the OPFS read microbenchmark.
 </p>
 <div class="row">
@@ -82,7 +82,7 @@
 </div>
 <pre id="opfs-install-log">—</pre>
 
-<h2>6. End-to-end mapping (FASTQ → SAM)</h2>
+<h2>5. End-to-end mapping (FASTQ → SAM)</h2>
 <p class="muted">
   Cuts known fragments from <code>synth.fa</code> as reads (50 forward,
   50 reverse-complement, 300 bp each), runs them through the full
@@ -98,10 +98,10 @@
   <pre id="map-sam-preview" style="font-size: 0.78rem;">—</pre>
 </details>
 
-<h2>9. Install mm39 from a single .qpack file (recommended for end users)</h2>
+<h2>6. Install mm39 from a single .qpack file (recommended for end users)</h2>
 <p class="muted">
   Streams a single packed file (mm39_w15.qpack, ~3.4 GB) into OPFS.
-  Same end-state as Section 8 but the user only downloads ONE file
+  Same end-state as Section 7 but the user only downloads ONE file
   instead of 4099. Uses fetch + ReadableStream + dedicated-worker
   sync-handle writes; works in all three browsers.
 </p>
@@ -110,11 +110,11 @@
 </div>
 <pre id="qpack-install-log">— click to install</pre>
 
-<h2>8. Install mm39 mouse reference into OPFS (~3.9 GB, one-time)</h2>
+<h2>7. Install mm39 mouse reference into OPFS (4099 separate files; alt path)</h2>
 <p class="muted">
   Streams all 4096 shards from <code>/tmp/mm39_build/index/</code> (served
   via <code>fixtures/local/mm39_index/</code>) into your browser's OPFS.
-  After install, switch the Section 7 reference selector to <code>mm39</code>
+  After install, switch the Section 8 reference selector to <code>mm39</code>
   and drop the 5KSR46 fastq.
 </p>
 <div class="row">
@@ -123,7 +123,7 @@
 </div>
 <pre id="mm39-install-log">— click to install</pre>
 
-<h2>7. Map your own FASTQ against the installed reference</h2>
+<h2>8. Map your own FASTQ against the installed reference</h2>
 <p class="muted">
   Drop a real FASTQ file. The page reads it 4 lines at a time, extracts
   minimizers via WASM, looks up hits against shards in OPFS, runs the
@@ -133,7 +133,7 @@
   <label>reference
     <select id="fastq-ref">
       <option value="synth">synth</option>
-      <option value="mm39">mm39 (install via Section 8 first)</option>
+      <option value="mm39">mm39 (install via Section 7 first)</option>
     </select>
   </label>
   <input type="file" id="fastq-file" accept=".fastq,.fq,.txt" />
@@ -146,7 +146,7 @@
   <pre id="fastq-sam-preview" style="font-size: 0.78rem;">—</pre>
 </details>
 
-<h2>5. OPFS read microbenchmark</h2>
+<h2>9. OPFS read microbenchmark (diagnostic)</h2>
 <p class="muted">
   Runs 1000 random explicit-offset reads against the installed shards at
   three granularities: 12 B (one hit record), 4 KB, 64 KB. Reports MiB/s
@@ -367,16 +367,24 @@
   function makeInstallWorker() {
     const src = `
       const sleep = ms => new Promise(r => setTimeout(r, ms));
-      async function openSahWithRetry(fh) {
-        for (let attempt = 0; attempt < 8; ++attempt) {
+      async function openSahWithRetry(fh, path) {
+        // Cap at 30 attempts × 500 ms ≈ 15 s. Chrome occasionally holds
+        // a sync handle for several seconds after the worker that owned
+        // it terminates; this gives it time to release. If we still
+        // fail, the user almost certainly has another tab open or a
+        // prior session's worker hasn't been GC'd — surface that.
+        for (let attempt = 0; attempt < 30; ++attempt) {
           try {
             return await fh.createSyncAccessHandle({ mode: 'readwrite' });
           } catch (e) {
             if (e.name !== 'NoModificationAllowedError') throw e;
-            await sleep(250 * (attempt + 1));
+            await sleep(500);
           }
         }
-        throw new Error('createSyncAccessHandle failed after 8 retries (file in use)');
+        throw new Error(
+          'createSyncAccessHandle failed after 30 retries on ' + path +
+          ' — close other browser tabs of this page and reload, then retry.'
+        );
       }
       self.onmessage = async (ev) => {
         const { refId, files } = ev.data;
@@ -389,7 +397,7 @@
           let totalBytes = 0;
           for (const f of files) {
             const fh = await refDir.getFileHandle(f.path, { create: true });
-            const sah = await openSahWithRetry(fh);
+            const sah = await openSahWithRetry(fh, f.path);
             try {
               sah.truncate(0);
               const written = sah.write(f.bytes, { at: 0 });
@@ -491,7 +499,7 @@
       .map(b => b.toString(16).padStart(2, '0')).join('');
   }
 
-  /* ----- Section 6: End-to-end mapping ------------------------------- */
+  /* ----- Section 5: End-to-end mapping ------------------------------- */
 
   const mapBtn = document.getElementById('map-btn');
   const mapLog = document.getElementById('map-log');
@@ -633,7 +641,7 @@
     }
   });
 
-  /* ----- Section 7: Map a user-supplied FASTQ ------------------------- */
+  /* ----- Section 8: Map a user-supplied FASTQ ------------------------- */
 
   const fastqInput = document.getElementById('fastq-file');
   const fastqMax = document.getElementById('fastq-max');
@@ -786,7 +794,7 @@
     }
   });
 
-  /* ----- Section 8: install mm39 to OPFS ------------------------------ */
+  /* ----- Section 7: install mm39 to OPFS ------------------------------ */
 
   const mm39InstallBtn = document.getElementById('mm39-install-btn');
   const mm39ClearBtn = document.getElementById('mm39-clear-btn');
@@ -880,7 +888,7 @@
         `      avg throughput: ${((totalBytes / (1024 * 1024)) / dt).toFixed(1)} MiB/s\n` +
         `      reference.json sha256 = ${manifestSha}\n` +
         `      OPFS path = /qtmap/references/mm39/\n` +
-        `      Switch Section 7 reference selector to "mm39" and drop the 5KSR46 fastq.`;
+        `      Switch Section 8 reference selector to "mm39" and drop the 5KSR46 fastq.`;
     } catch (e) {
       mm39InstallLog.innerHTML = `<span class="err">FAIL</span> ${e.message ?? e}\n${e.stack ?? ''}`;
       throw e;
@@ -907,7 +915,7 @@
     }
   });
 
-  /* ----- Section 9: install from .qpack (single-file bundle) ---------- */
+  /* ----- Section 6: install from .qpack (single-file bundle) ---------- */
 
   const qpackInstallBtn = document.getElementById('qpack-install-btn');
   const qpackInstallLog = document.getElementById('qpack-install-log');
@@ -996,16 +1004,19 @@
         return true;
       }
 
-      async function openSahWithRetry(fh) {
-        for (let attempt = 0; attempt < 8; ++attempt) {
+      async function openSahWithRetry(fh, path) {
+        for (let attempt = 0; attempt < 30; ++attempt) {
           try {
             return await fh.createSyncAccessHandle({ mode: 'readwrite' });
           } catch (e) {
             if (e.name !== 'NoModificationAllowedError') throw e;
-            await sleep(250 * (attempt + 1));
+            await sleep(500);
           }
         }
-        throw new Error('createSyncAccessHandle failed after 8 retries (file in use)');
+        throw new Error(
+          'createSyncAccessHandle failed after 30 retries on ' + (path || '?') +
+          ' — close other browser tabs of this page and reload, then retry.'
+        );
       }
 
       async function writeFileFromBuf(file) {
@@ -1015,7 +1026,7 @@
         const slice = buf.slice(localStart, localStart + file.size);
         if (slice.length !== file.size) throw new Error('bad slice for ' + file.path);
         const fh = await refDir.getFileHandle(file.path, { create: true });
-        const sah = await openSahWithRetry(fh);
+        const sah = await openSahWithRetry(fh, file.path);
         try {
           sah.truncate(0);
           const written = sah.write(slice, { at: 0 });
@@ -1153,14 +1164,14 @@
         `<span class="ok">OK</span>   wrote ${result.filesDone} files (${mib} MiB) to OPFS in ${dt.toFixed(1)} s\n` +
         `      avg throughput: ${(result.bytesReceived / (1024 * 1024) / dt).toFixed(1)} MiB/s\n` +
         `      OPFS path = /qtmap/references/mm39/\n` +
-        `      Switch Section 7 reference selector to "mm39" and drop the 5KSR46 fastq.`;
+        `      Switch Section 8 reference selector to "mm39" and drop the 5KSR46 fastq.`;
     } catch (e) {
       qpackInstallLog.innerHTML = `<span class="err">FAIL</span> ${e.message ?? e}\n${e.stack ?? ''}`;
       throw e;
     }
   });
 
-  /* ----- Section 5: OPFS read microbenchmark -------------------------- */
+  /* ----- Section 9: OPFS read microbenchmark -------------------------- */
 
   /**
    * Runs the benchmark inside a dedicated worker so we can use sync access
