@@ -366,6 +366,18 @@
    */
   function makeInstallWorker() {
     const src = `
+      const sleep = ms => new Promise(r => setTimeout(r, ms));
+      async function openSahWithRetry(fh) {
+        for (let attempt = 0; attempt < 8; ++attempt) {
+          try {
+            return await fh.createSyncAccessHandle({ mode: 'readwrite' });
+          } catch (e) {
+            if (e.name !== 'NoModificationAllowedError') throw e;
+            await sleep(250 * (attempt + 1));
+          }
+        }
+        throw new Error('createSyncAccessHandle failed after 8 retries (file in use)');
+      }
       self.onmessage = async (ev) => {
         const { refId, files } = ev.data;
         try {
@@ -377,7 +389,7 @@
           let totalBytes = 0;
           for (const f of files) {
             const fh = await refDir.getFileHandle(f.path, { create: true });
-            const sah = await fh.createSyncAccessHandle({ mode: 'readwrite' });
+            const sah = await openSahWithRetry(fh);
             try {
               sah.truncate(0);
               const written = sah.write(f.bytes, { at: 0 });
@@ -781,6 +793,23 @@
   const mm39InstallLog = document.getElementById('mm39-install-log');
 
   mm39InstallBtn.addEventListener('click', async () => {
+    mm39InstallLog.textContent = 'wiping any prior mm39 dir…';
+    // Wipe any previous install so leftover sync handles do not fail this
+    // install with NoModificationAllowedError. Retry briefly because Chrome
+    // releases handles asynchronously after a worker terminates.
+    for (let attempt = 0; attempt < 6; ++attempt) {
+      try {
+        const root = await navigator.storage.getDirectory();
+        const app = await root.getDirectoryHandle('qtmap', { create: true });
+        const refs = await app.getDirectoryHandle('references', { create: true });
+        await refs.removeEntry('mm39', { recursive: true });
+        break;
+      } catch (e) {
+        if (e.name === 'NotFoundError') break;
+        if (e.name !== 'NoModificationAllowedError') throw e;
+        await new Promise(r => setTimeout(r, 500 * (attempt + 1)));
+      }
+    }
     mm39InstallLog.textContent = 'fetching reference.json…';
     const worker = makeInstallWorker();
     try {
