@@ -29,6 +29,7 @@ import { shardIdForHash } from './planner.js';
 import { chainAnchors } from './chain.js';
 import { selectFragments } from './fragment-select.js';
 import { buildSamHeader, emitReadSamLines } from './sam-emitter.js';
+import { refineChainEndpoints } from './endpoint-refine.js';
 
 /**
  * Map a batch of reads end to end and produce a SAM body.
@@ -108,16 +109,28 @@ export async function mapReads({
   }
   const tLookup = performance.now() - t1;
 
-  /* Step 4 + 5: chain + select per read. */
+  /* Step 4 + 5: chain + select per read. Optionally refine chain endpoints
+     against the reference sequence to recover the bp our seed-anchor
+     chain undershoots minimap2's ksw-based extension by. */
   const t2 = performance.now();
   const fragmentSets = [];
   let mappedReads = 0;
   let unmappedReads = 0;
   let totalFragments = 0;
+  const getRefBases = options.getRefBases;     // optional
+  const contigLengths = contigs.map(c => c.length);
   for (let readIdx = 0; readIdx < reads.length; ++readIdx) {
     const anchors = anchorsByRead[readIdx];
     if (anchors.length === 0) { unmappedReads++; fragmentSets.push([]); continue; }
-    const chains = chainAnchors(anchors, { k });
+    let chains = chainAnchors(anchors, { k });
+    if (getRefBases) {
+      // Refine each chain in place using base-level extension.
+      for (const ch of chains) {
+        refineChainEndpoints(
+          ch, reads[readIdx].seq, getRefBases, contigLengths[ch.contigId] ?? Infinity,
+        );
+      }
+    }
     const records = selectFragments(chains, { secondary });
     fragmentSets.push(records);
     if (records.length > 0) {

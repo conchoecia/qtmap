@@ -27,13 +27,17 @@ import { performance } from 'node:perf_hooks';
 import { mapReads } from '../../mapper-core/src/map-reads.js';
 import { parseContigs } from '../../mapper-core/src/contigs-codec.js';
 import { buildSamHeader } from '../../mapper-core/src/sam-emitter.js';
+import {
+  contigByteOffsets,
+  decodeBases,
+} from '../../mapper-core/src/sequence-codec.js';
 import { loadSeedCore } from '../../mapper-wasm/src/bindings.js';
 import { DiskShardCache } from './disk-shard-loader.js';
 
 const DEFAULT_BATCH = 1000;
 
 function parseArgs(argv) {
-  const out = { batch: DEFAULT_BATCH, secondary: 0 };
+  const out = { batch: DEFAULT_BATCH, secondary: 0, refine: 'auto' };
   for (let i = 0; i < argv.length; ++i) {
     const a = argv[i];
     if (a === '--reference') out.reference = argv[++i];
@@ -42,6 +46,7 @@ function parseArgs(argv) {
     else if (a === '--batch') out.batch = parseInt(argv[++i], 10);
     else if (a === '--secondary') out.secondary = parseInt(argv[++i], 10);
     else if (a === '--max-reads') out.maxReads = parseInt(argv[++i], 10);
+    else if (a === '--refine') out.refine = argv[++i];   // 'auto' | 'on' | 'off'
     else throw new Error(`unknown arg: ${a}`);
   }
   if (!out.reference || !out.reads || !out.out) {
@@ -122,6 +127,32 @@ async function main() {
 
   const cache = new DiskShardCache(args.reference, ref.shards);
 
+  // Optional reference-sequence loader for base-level chain refinement.
+  // sequence.bin is only present when the index was built with
+  // --store-sequence. When absent we silently skip refinement.
+  let getRefBases = null;
+  const seqPath = join(args.reference, 'sequence.bin');
+  let useRefine = args.refine !== 'off';
+  let seqBuf = null;
+  let contigOffsets = null;
+  if (useRefine) {
+    try {
+      seqBuf = readFileSync(seqPath);
+      contigOffsets = contigByteOffsets(contigs);
+      getRefBases = (contigId, start, end) =>
+        decodeBases(seqBuf, contigOffsets[contigId], contigs[contigId].length, start, end);
+      console.error(`[run-mapper] refine:    on (sequence.bin = ${seqBuf.length.toLocaleString()} bytes)`);
+    } catch (e) {
+      if (args.refine === 'on') {
+        throw new Error(`--refine on but sequence.bin missing: ${e.message}`);
+      }
+      console.error(`[run-mapper] refine:    off (no sequence.bin)`);
+      useRefine = false;
+    }
+  } else {
+    console.error(`[run-mapper] refine:    off (--refine off)`);
+  }
+
   const out = openSync(args.out, 'w');
 
   // Header
@@ -138,7 +169,7 @@ async function main() {
   for await (const read of streamFastq(args.reads, args.maxReads)) {
     batch.push(read);
     if (batch.length >= args.batch) {
-      const r = await runBatch(batch, cache, core, contigs, ref, args.secondary);
+      const r = await runBatch(batch, cache, core, contigs, ref, args.secondary, getRefBases);
       writeSync(out, r.body);
       totalReads += r.stats.readCount;
       totalMapped += r.stats.mappedReads;
@@ -158,7 +189,7 @@ async function main() {
     }
   }
   if (batch.length > 0) {
-    const r = await runBatch(batch, cache, core, contigs, ref, args.secondary);
+    const r = await runBatch(batch, cache, core, contigs, ref, args.secondary, getRefBases);
     writeSync(out, r.body);
     totalReads += r.stats.readCount;
     totalMapped += r.stats.mappedReads;
@@ -196,14 +227,14 @@ async function main() {
   console.error(`[run-mapper] summary: ${summaryPath}`);
 }
 
-async function runBatch(batch, cache, core, contigs, ref, secondary) {
+async function runBatch(batch, cache, core, contigs, ref, secondary, getRefBases) {
   const { sam, stats } = await mapReads({
     reads: batch,
     contigs,
     referenceManifest: ref,
     extractMinimizers: (seq) => core.extractMinimizers(seq, ref.k, ref.w),
     lookupHits: (sid, hashes) => cache.lookupHits(sid, hashes),
-    options: { secondary, emitHeader: false },
+    options: { secondary, emitHeader: false, getRefBases },
   });
   return { body: sam, stats };
 }

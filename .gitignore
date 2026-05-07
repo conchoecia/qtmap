@@ -1,5 +1,6 @@
 # Private fixtures (sequence data — see fixture README)
 fixtures/5KSR46_mm39_minimap2_ont/
+fixtures/QDYBSX_hg38_minimap2_ont/
 fixtures/local/
 
 # Build outputs
