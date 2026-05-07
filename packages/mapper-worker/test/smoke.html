@@ -1051,7 +1051,9 @@
           buf = buf.subarray(localDrop);
           bufStart = dataOffset + dropTo;
           nextFileIdx++;
-          if (nextFileIdx % 256 === 0 || nextFileIdx === table.length) {
+          // Emit progress every 32 files (~22 MiB on mm39) for smoother UI.
+          // Also always emit on the last file.
+          if (nextFileIdx % 32 === 0 || nextFileIdx === table.length) {
             self.postMessage({ type: 'progress', filesDone: nextFileIdx, totalFiles: table.length, bytesReceived });
           }
         }
@@ -1121,7 +1123,9 @@
             `${(m.bytesReceived / (1024**2)).toFixed(0)} MiB / ${(total / (1024**2)).toFixed(0)} MiB ` +
             `(${pct}%, ${mibps.toFixed(1)} MiB/s)`;
         } else if (m.type === 'header') {
-          qpackInstallLog.textContent = `header parsed: ${m.fileCount} files`;
+          qpackInstallLog.textContent =
+            `header parsed: ${m.fileCount} files. Streaming + writing to OPFS… ` +
+            `(progress updates after every 32 files written; first update arrives ~5 s in)`;
         } else if (m.type === 'error') {
           qpackInstallLog.innerHTML = `<span class="err">FAIL</span> ${m.error}\n${m.stack ?? ''}`;
         }
