@@ -1087,11 +1087,30 @@
         }
       };
 
+      // Aggregate ReadableStream chunks before posting to worker. fetch
+      // hands us ~64 KB per chunk; raw forwarding produces ~50 k
+      // postMessage calls on a 3.4 GB stream and the worker's per-call
+      // overhead dominates throughput. Coalesce to ≥ 4 MiB per message.
+      const AGG_BYTES = 4 * 1024 * 1024;
+      let pending = [];
+      let pendingBytes = 0;
+      const flushPending = () => {
+        if (pendingBytes === 0) return;
+        const merged = new Uint8Array(pendingBytes);
+        let p = 0;
+        for (const u of pending) { merged.set(u, p); p += u.length; }
+        worker.postMessage({ command: 'chunk', chunk: merged.buffer }, [merged.buffer]);
+        pending = [];
+        pendingBytes = 0;
+      };
       while (true) {
         const { value, done } = await reader.read();
         if (done) break;
-        worker.postMessage({ command: 'chunk', chunk: value.buffer }, [value.buffer]);
+        pending.push(value);
+        pendingBytes += value.length;
+        if (pendingBytes >= AGG_BYTES) flushPending();
       }
+      flushPending();
 
       const result = await new Promise((resolve, reject) => {
         worker.onmessage = (ev) => ev.data.type === 'done' ? resolve(ev.data)
