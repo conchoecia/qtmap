@@ -1,0 +1,18 @@
+{
+  "name": "@qtqc/mapper-core",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Pure-TypeScript core: shard codec mirror, query planner, SAM emitter, FASTA/FASTQ helpers. No browser APIs; usable from Node and from a worker.",
+  "license": "MIT",
+  "type": "module",
+  "main": "./src/index.js",
+  "exports": {
+    ".": "./src/index.js",
+    "./shard-codec": "./src/shard-codec.js",
+    "./planner": "./src/planner.js",
+    "./sam-emitter": "./src/sam-emitter.js"
+  },
+  "scripts": {
+    "test": "node --test test/*.test.js"
+  }
+}
