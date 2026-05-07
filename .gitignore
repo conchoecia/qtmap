@@ -1,0 +1,38 @@
+# Private fixtures (sequence data — see fixture README)
+fixtures/5KSR46_mm39_minimap2_ont/
+fixtures/local/
+
+# Build outputs
+build/
+build-wasm/
+build-*/
+dist/
+*.wasm
+*.wasm.map
+packages/*/dist/
+packages/mapper-wasm/seed_core.*
+
+# Node
+node_modules/
+package-lock.json
+*.tsbuildinfo
+
+# CMake
+CMakeCache.txt
+CMakeFiles/
+CMakeUserPresets.json
+cmake-build-*/
+compile_commands.json
+
+# Editor / OS
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+
+# Test outputs
+*.bench.tsv
+coverage/
+*.log
+*.tmp
