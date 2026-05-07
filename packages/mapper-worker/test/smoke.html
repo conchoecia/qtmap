@@ -905,10 +905,25 @@
       let bufStart = 0;
       let buf = new Uint8Array(0);  // pending bytes (those past where we've written)
 
+      async function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
       async function ensureRefDir(refId) {
         const root = await navigator.storage.getDirectory();
         const app = await root.getDirectoryHandle('qtqc-mm2browser', { create: true });
         const refs = await app.getDirectoryHandle('references', { create: true });
+        // Wipe any prior install to avoid 'open Access Handle' conflicts
+        // when a previous Section 7/8 worker hasn't fully released its
+        // sync handles yet. Retry briefly on NoModificationAllowedError.
+        for (let attempt = 0; attempt < 6; ++attempt) {
+          try {
+            await refs.removeEntry(refId, { recursive: true });
+            break;
+          } catch (e) {
+            if (e.name === 'NotFoundError') break;
+            if (e.name !== 'NoModificationAllowedError') throw e;
+            await sleep(500 * (attempt + 1));
+          }
+        }
         return refs.getDirectoryHandle(refId, { create: true });
       }
 
@@ -952,6 +967,18 @@
         return true;
       }
 
+      async function openSahWithRetry(fh) {
+        for (let attempt = 0; attempt < 8; ++attempt) {
+          try {
+            return await fh.createSyncAccessHandle({ mode: 'readwrite' });
+          } catch (e) {
+            if (e.name !== 'NoModificationAllowedError') throw e;
+            await sleep(250 * (attempt + 1));
+          }
+        }
+        throw new Error('createSyncAccessHandle failed after 8 retries (file in use)');
+      }
+
       async function writeFileFromBuf(file) {
         // Slice [file.offset, file.offset+file.size) out of bufStart-relative buf.
         const localStart = file.offset - (bufStart - dataOffset);
@@ -959,7 +986,7 @@
         const slice = buf.slice(localStart, localStart + file.size);
         if (slice.length !== file.size) throw new Error('bad slice for ' + file.path);
         const fh = await refDir.getFileHandle(file.path, { create: true });
-        const sah = await fh.createSyncAccessHandle({ mode: 'readwrite' });
+        const sah = await openSahWithRetry(fh);
         try {
           sah.truncate(0);
           const written = sah.write(slice, { at: 0 });
