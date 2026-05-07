@@ -1,0 +1,252 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>qtqc-mm2browser smoke test</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    font: 14px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+  body { max-width: 980px; margin: 2rem auto; padding: 0 1rem; }
+  h1 { font-size: 1.4rem; }
+  h2 { font-size: 1.1rem; margin-top: 2rem; border-top: 1px solid #ccc; padding-top: 1rem; }
+  textarea { width: 100%; min-height: 5rem; font: inherit; }
+  input[type=number] { width: 5rem; font: inherit; }
+  button { font: inherit; padding: 0.4rem 0.8rem; cursor: pointer; }
+  pre {
+    white-space: pre-wrap;
+    background: light-dark(#f3f3f3, #1f1f1f);
+    color: light-dark(#222, #e6e6e6);
+    padding: 0.6rem;
+    border-radius: 4px;
+    border: 1px solid light-dark(#ddd, #333);
+  }
+  table { border-collapse: collapse; font-size: 0.9rem; }
+  th, td { border: 1px solid #888; padding: 0.2rem 0.6rem; text-align: right; }
+  th:nth-child(1), td:nth-child(1) { text-align: left; }
+  /* Status-colour helpers chosen to be legible against both pre backgrounds. */
+  .ok   { color: light-dark(#058a05, #5cd65c); font-weight: bold; }
+  .err  { color: light-dark(#a40000, #ff7070); font-weight: bold; }
+  .warn { color: light-dark(#955900, #ffb84d); font-weight: bold; }
+  .muted { color: light-dark(#666, #aaa); }
+  .row { display: flex; gap: 1rem; align-items: center; flex-wrap: wrap; }
+</style>
+</head>
+<body>
+
+<h1>qtqc-mm2browser smoke test</h1>
+<p class="muted">
+  Loads <code>seed_core.wasm</code> (built locally via
+  <code>scripts/build-wasm.sh</code>) and the <code>@qtqc/mapper-core</code>
+  shard codec. Smoke test: run minimizer extraction in the browser, then
+  look up minimizers against the synthetic 16-shard fixture committed at
+  <code>fixtures/synthetic/index-out-1/</code>.
+</p>
+
+<h2>1. WASM init</h2>
+<pre id="init-log">loading…</pre>
+
+<h2>2. Live minimizer extraction</h2>
+<div class="row">
+  <label>k <input type="number" id="k" value="15" min="1" max="28"></label>
+  <label>w <input type="number" id="w" value="10" min="1" max="64"></label>
+  <button id="extract-btn">Extract</button>
+</div>
+<p>Sequence (ACGT, &gt; 0 chars):</p>
+<textarea id="seq">ACGTAGCATGCATGCATGCATGCATGCATGCAGCTAGCATCGTAGCTAGCATCGATCGACGCAGCTAGCATCGAGCAGCAGCAGGTACTAGCATCGATGCATGCATCGATGCATGC</textarea>
+<pre id="extract-log">—</pre>
+
+<h2>3. Synthetic shard lookup</h2>
+<p class="muted">
+  Fetches every <code>seed-shard-NNNN.bin</code> over HTTP, parses with the
+  TS shard codec, and answers minimizer lookups extracted from the sequence
+  above. Round-trips the same hash universe between WASM (on the seq) and
+  the C-built shards.
+</p>
+<div class="row">
+  <button id="lookup-btn">Run lookup</button>
+</div>
+<pre id="lookup-log">—</pre>
+
+<script type="module">
+  import createModule from '../../mapper-wasm/dist/seed_core.js';
+  import { loadSeedCore } from '../../mapper-wasm/src/bindings.js';
+  import {
+    parseShard,
+    decodeHit,
+    findDirEntry,
+    HIT_RECORD_SIZE,
+    HEADER_SIZE,
+    DIR_ENTRY_SIZE,
+  } from '../../mapper-core/src/shard-codec.js';
+  import { shardIdForHash } from '../../mapper-core/src/planner.js';
+
+  const initLog = document.getElementById('init-log');
+  const extractBtn = document.getElementById('extract-btn');
+  const extractLog = document.getElementById('extract-log');
+  const lookupBtn = document.getElementById('lookup-btn');
+  const lookupLog = document.getElementById('lookup-log');
+
+  let core;
+  try {
+    const t0 = performance.now();
+    core = await loadSeedCore();
+    const dt = (performance.now() - t0).toFixed(2);
+    initLog.innerHTML =
+      `<span class="ok">OK</span>   WASM module loaded in ${dt} ms\n` +
+      `      hashFunctionId = ${core.hashFunctionId()} (mm_hash64_v1)\n` +
+      `      navigator.userAgent = ${navigator.userAgent}`;
+  } catch (e) {
+    initLog.innerHTML = `<span class="err">FAIL</span> ${e.message ?? e}`;
+    throw e;
+  }
+
+  function fmtHashHex(h) {
+    return '0x' + h.toString(16).padStart(16, '0');
+  }
+
+  extractBtn.addEventListener('click', () => {
+    const seq = document.getElementById('seq').value.trim();
+    const k = parseInt(document.getElementById('k').value, 10);
+    const w = parseInt(document.getElementById('w').value, 10);
+    const t0 = performance.now();
+    let mz;
+    try {
+      mz = core.extractMinimizers(seq, k, w);
+    } catch (e) {
+      extractLog.innerHTML = `<span class="err">FAIL</span> ${e.message ?? e}`;
+      return;
+    }
+    const dt = (performance.now() - t0).toFixed(3);
+
+    const head = mz.slice(0, 12);
+    const lines = head.map(m =>
+      `  pos=${String(m.pos).padStart(5)}  strand=${m.strand}  hash=${fmtHashHex(m.hash)}`,
+    ).join('\n');
+    extractLog.innerHTML =
+      `<span class="ok">OK</span>   ${mz.length} minimizers in ${dt} ms` +
+      ` (k=${k}, w=${w}, len=${seq.length})\n` +
+      `      first ${head.length} records:\n${lines}` +
+      (mz.length > head.length ? `\n      … ${mz.length - head.length} more` : '');
+  });
+
+  // Click-once load all 16 synthetic shards into RAM once.
+  let shards = null;
+  let shardBits = 4;
+  async function loadShardsOnce() {
+    if (shards) return shards;
+    const base = '../../../fixtures/synthetic/index-out-1';
+    const refResp = await fetch(`${base}/reference.json`);
+    const ref = await refResp.json();
+    shardBits = ref.shardBits;
+    const out = [];
+    for (let s = 0; s < ref.shards; ++s) {
+      const path = `${base}/seed-shard-${String(s).padStart(4, '0')}.bin`;
+      const resp = await fetch(path);
+      if (!resp.ok) throw new Error(`fetch ${path}: ${resp.status}`);
+      const ab = await resp.arrayBuffer();
+      out.push(parseShard(ab));
+    }
+    shards = out;
+    return shards;
+  }
+
+  /**
+   * Parse a small FASTA file into a list of { name, seq } contigs. Whole
+   * file in memory; suitable for the synth fixture only.
+   */
+  function parseFasta(text) {
+    const out = [];
+    let cur = null;
+    for (const line of text.split('\n')) {
+      if (line.startsWith('>')) {
+        if (cur) out.push(cur);
+        cur = { name: line.slice(1).split(/\s+/)[0], seq: '' };
+      } else if (cur) {
+        cur.seq += line.toUpperCase().replace(/\s+/g, '');
+      }
+    }
+    if (cur) out.push(cur);
+    return out;
+  }
+
+  lookupBtn.addEventListener('click', async () => {
+    lookupLog.textContent = 'loading shards…';
+    let shardSet;
+    try {
+      const t0 = performance.now();
+      shardSet = await loadShardsOnce();
+      const dt = (performance.now() - t0).toFixed(2);
+      const total = shardSet.reduce((acc, s) => acc + Number(s.header.hitCount), 0);
+      const lines = [
+        `<span class="ok">OK</span>   ${shardSet.length} shards loaded in ${dt} ms,`
+        + ` ${total.toLocaleString()} total hits, shardBits=${shardBits}`,
+      ];
+
+      // Parse FASTA properly and extract minimizers per-contig (matches the
+      // C builder's per-contig pass — concatenating contigs would create
+      // boundary-spanning kmers that do not exist in the shard set).
+      const synthFastaResp = await fetch('../../../fixtures/synthetic/synth.fa');
+      const synthFasta = await synthFastaResp.text();
+      const contigs = parseFasta(synthFasta);
+
+      const t1 = performance.now();
+      const queryMz = [];
+      for (const c of contigs) {
+        for (const m of core.extractMinimizers(c.seq, 15, 10)) {
+          queryMz.push(m);
+        }
+      }
+      const dt1 = (performance.now() - t1).toFixed(2);
+
+      const t2 = performance.now();
+      let hitCount = 0;
+      let queriesAnswered = 0;
+      let queriesMissed = 0;
+      for (const q of queryMz) {
+        const sid = shardIdForHash(q.hash, shardBits);
+        const shard = shardSet[sid];
+        const dirBytes = new Uint8Array(
+          shard.hitsBuffer,
+          HEADER_SIZE,
+          shard.directory.length * DIR_ENTRY_SIZE,
+        );
+        const e = findDirEntry(dirBytes, shard.directory.length, q.hash);
+        if (e) {
+          ++queriesAnswered;
+          hitCount += e.hitCount;
+        } else {
+          ++queriesMissed;
+        }
+      }
+      const dt2 = (performance.now() - t2).toFixed(2);
+
+      lines.push(
+        `      contigs:          ${contigs.length} (`
+          + contigs.map(c => `${c.name}=${c.seq.length} bp`).join(', ') + ')',
+        `      query extraction: ${queryMz.length} minimizers in ${dt1} ms`,
+        `      lookup:           ${queriesAnswered} hits / ${queriesMissed} misses in ${dt2} ms`,
+        `      total seed hits returned: ${hitCount}`,
+      );
+
+      // Per-contig extraction must match the C builder exactly: every query
+      // minimizer should round-trip into the shard set. queriesMissed === 0.
+      if (queriesMissed === 0 && queryMz.length === total) {
+        lines.push('<span class="ok">PASS</span> WASM extraction round-trips into C-built shards exactly');
+      } else if (queriesMissed === 0) {
+        lines.push(`<span class="warn">PARTIAL</span> all queries hit, but query count (${queryMz.length}) ≠ shard hit count (${total})`);
+      } else {
+        lines.push(`<span class="err">FAIL</span> ${queriesMissed} unmatched queries`);
+      }
+
+      lookupLog.innerHTML = lines.join('\n');
+    } catch (e) {
+      lookupLog.innerHTML = `<span class="err">FAIL</span> ${e.message ?? e}\n${e.stack ?? ''}`;
+      throw e;
+    }
+  });
+</script>
+
+</body>
+</html>
