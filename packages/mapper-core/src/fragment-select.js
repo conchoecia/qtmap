@@ -31,7 +31,11 @@ const SECONDARY_QSPAN_OVERLAP = 0.8;
  * tiny supplementary records that minimap2 would never emit. */
 const DEFAULT_MIN_REF_SPAN = 40;
 const DEFAULT_MIN_ANCHOR_COUNT = 3;
-const DEFAULT_MIN_SCORE_RATIO = 0.4;
+/* Tuned 2026-05-06 against the 5KSR46 / mm39 fixture. At 0.3 the QTQC
+ * dipc-sam.js -> hickitPairsFromFragments contact count is 912 / 953 =
+ * 95.6 % of native minimap2 -ax map-ont. Looser values overshoot the
+ * golden contact count; tighter values undershoot. */
+const DEFAULT_MIN_SCORE_RATIO = 0.3;
 
 /**
  * Select fragment placements for one read from a list of candidate chains.
