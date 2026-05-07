@@ -108,8 +108,9 @@
 </p>
 <div class="row">
   <button id="qpack-install-btn">Install from .qpack</button>
+  <button id="qpack-wipe-btn">Wipe all qtmap OPFS</button>
 </div>
-<pre id="qpack-install-log">— click to install</pre>
+<pre id="qpack-install-log">— click to install. If a prior install stalls, click Wipe + reload page first.</pre>
 
 <h2>7. Install mm39 (alt path — 4099 separate file fetches)</h2>
 <p class="muted">
@@ -1183,6 +1184,28 @@
     } catch (e) {
       qpackInstallLog.innerHTML = `<span class="err">FAIL</span> ${e.message ?? e}\n${e.stack ?? ''}`;
       throw e;
+    }
+  });
+
+  document.getElementById('qpack-wipe-btn').addEventListener('click', async () => {
+    qpackInstallLog.textContent = 'wiping…';
+    try {
+      const root = await navigator.storage.getDirectory();
+      try {
+        await root.removeEntry('qtmap', { recursive: true });
+        qpackInstallLog.innerHTML =
+          '<span class="ok">OK</span>   wiped /qtmap/ from OPFS. ' +
+          'RELOAD this page (cmd-R) before clicking Install — the in-flight ' +
+          'workers in this tab still hold released-but-not-GC handles.';
+      } catch (e) {
+        if (e.name === 'NotFoundError') {
+          qpackInstallLog.innerHTML = '<span class="muted">already empty</span>';
+        } else {
+          throw e;
+        }
+      }
+    } catch (e) {
+      qpackInstallLog.innerHTML = `<span class="err">FAIL</span> ${e.message ?? e}`;
     }
   });
 
