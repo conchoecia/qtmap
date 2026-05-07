@@ -137,7 +137,7 @@
   <label>reference
     <select id="fastq-ref">
       <option value="synth">synth</option>
-      <option value="mm39">mm39 (install via Section 7 first)</option>
+      <option value="mm39">mm39 (install via Section 6 first)</option>
     </select>
   </label>
   <input type="file" id="fastq-file" accept=".fastq,.fq,.txt" />
@@ -746,7 +746,7 @@
       const refSelected = document.getElementById('fastq-ref').value;
       const refDir = await getOpfsRefDir({ create: false, refId: refSelected }).catch(() => null);
       if (!refDir) {
-        throw new Error(`no OPFS reference '${refSelected}' installed; run Section ${refSelected === 'mm39' ? 8 : 4} first`);
+        throw new Error(`no OPFS reference '${refSelected}' installed; run Section ${refSelected === 'mm39' ? 6 : 4} first`);
       }
       const manifestFh = await refDir.getFileHandle('reference.json');
       const manifestText = await (await manifestFh.getFile()).text();
