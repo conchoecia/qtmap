@@ -14,9 +14,9 @@ test('parseContigs reads synth.fa contigs.bin', () => {
     join(REPO_ROOT, 'fixtures', 'synthetic', 'index-out-1', 'contigs.bin'),
   );
   const contigs = parseContigs(buf);
-  assert.equal(contigs.length, 2);
-  assert.equal(contigs[0].name, 'contig1');
-  assert.equal(contigs[1].name, 'contig2');
-  assert.equal(contigs[0].length, 10000);
-  assert.equal(contigs[1].length, 10000);
+  assert.equal(contigs.length, 4);
+  for (let i = 0; i < 4; i++) {
+    assert.equal(contigs[i].name, `chr${i + 1}`);
+    assert.equal(contigs[i].length, 250000);
+  }
 });

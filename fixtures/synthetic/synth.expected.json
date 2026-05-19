@@ -1,0 +1,10 @@
+{
+  "n_reads": 5000,
+  "genome_seed": 42,
+  "read_seed": 4242,
+  "minimap2_alignment_records": 5000,
+  "minimap2_mapped": 5000,
+  "minimap2_unmapped": 0,
+  "minimap2_supplementary": 0,
+  "minimap2_secondary": 0
+}
