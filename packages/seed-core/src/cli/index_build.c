@@ -1,3 +1,8 @@
+/* strdup is POSIX, not ISO C; gate it on _POSIX_C_SOURCE so strict -std=c11
+ * builds (e.g. gcc on Ubuntu CI) expose the real prototype instead of a
+ * synthetic implicit `int (*)()` that truncates the returned pointer on LP64. */
+#define _POSIX_C_SOURCE 200809L
+
 #include "qtqc/fasta.h"
 #include "qtqc/hash.h"
 #include "qtqc/minimizer.h"
