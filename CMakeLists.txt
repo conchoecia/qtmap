@@ -19,6 +19,11 @@ if(CMAKE_C_COMPILER_ID MATCHES "Clang|GNU")
         -Wshadow -Wformat=2 -Wcast-align -Wstrict-prototypes
         -Wmissing-prototypes -Wnull-dereference
         -fno-strict-aliasing
+        # Implicit declarations of pointer-returning POSIX functions collapse
+        # to `int` and silently truncate on LP64. Make that a hard build error
+        # so the failure mode surfaces at compile time, not as a runtime SEGV.
+        -Werror=implicit-function-declaration
+        -Werror=int-conversion
     )
     if(CMAKE_BUILD_TYPE STREQUAL "Release")
         add_compile_options(-O3)
