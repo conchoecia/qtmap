@@ -1,9 +1,15 @@
+/* mkstemp / fdopen are POSIX, not ISO C; gate them on _POSIX_C_SOURCE so
+ * strict -std=c11 builds (e.g. gcc on Ubuntu CI) see the real prototypes
+ * instead of synthesising an implicit `int (*)()` that truncates pointers. */
+#define _POSIX_C_SOURCE 200809L
+
 #include "qtqc/shard.h"
 
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 #define EXPECT(expr) do { \
     if (!(expr)) { \
