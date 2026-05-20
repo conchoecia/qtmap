@@ -94,6 +94,14 @@ export function buildSamHeader(contigs, programLine = '@PG\tID:qtmap\tPN:qtmap\t
  *   if records is empty (the caller may decide to emit an unmapped record).
  */
 export function emitReadSamLines(read, records, contigs) {
+  if (!read || typeof read.name !== 'string' || read.name.length === 0) {
+    throw new Error(
+      `emitReadSamLines: read.name (SAM QNAME) is required as a non-empty string, got ${JSON.stringify({
+        name: read?.name,
+        keys: read ? Object.keys(read) : null,
+      })}. Callers passing alternate fields (e.g. \`read_id\`) must normalize them to \`name\` before emitting SAM.`
+    );
+  }
   if (records.length === 0) return emitUnmappedRecord(read);
 
   // Build SA:Z tag once (shared by every fragment of the same read).
@@ -152,6 +160,14 @@ export function emitReadSamLines(read, records, contigs) {
 }
 
 function emitUnmappedRecord(read) {
+  if (!read || typeof read.name !== 'string' || read.name.length === 0) {
+    throw new Error(
+      `emitUnmappedRecord: read.name (SAM QNAME) is required as a non-empty string, got ${JSON.stringify({
+        name: read?.name,
+        keys: read ? Object.keys(read) : null,
+      })}`
+    );
+  }
   return [
     read.name,
     String(SAM_FLAG_UNMAPPED),

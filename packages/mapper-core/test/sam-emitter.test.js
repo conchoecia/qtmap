@@ -104,3 +104,33 @@ test('emitReadSamLines emits one unmapped record when no fragments selected', ()
   assert.equal(fields[5], '*');
   assert.equal(fields[9], 'ACGT');
 });
+
+/* Regression guard for a silent-data-loss bug seen in the qtqc browser
+ * pipeline: caller passed reads with `read_id` instead of `name`, so
+ * every emitted SAM record had an empty QNAME. Downstream consumers
+ * parsed by QNAME, all 4900 mapped records collapsed to ~3 unique
+ * reads in the report, and mapping looked broken even though
+ * mapReads itself had mapped 98%. Fail loud now so the bug is
+ * caught immediately at first SAM emission. */
+test('emitReadSamLines throws when read.name is missing', () => {
+  const readNoName = { read_id: 'r1', seq: 'ACGT', qual: 'IIII' };
+  assert.throws(
+    () => emitReadSamLines(readNoName, [], [{ name: 'chr1' }]),
+    /read\.name \(SAM QNAME\) is required/
+  );
+});
+
+test('emitReadSamLines throws when read.name is empty string', () => {
+  const readEmpty = { name: '', seq: 'ACGT', qual: 'IIII' };
+  assert.throws(
+    () => emitReadSamLines(readEmpty, [], [{ name: 'chr1' }]),
+    /read\.name \(SAM QNAME\) is required/
+  );
+});
+
+test('emitReadSamLines throws when read.name is non-string', () => {
+  assert.throws(
+    () => emitReadSamLines({ name: 42, seq: 'ACGT' }, [], [{ name: 'chr1' }]),
+    /read\.name \(SAM QNAME\) is required/
+  );
+});
